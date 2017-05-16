@@ -1,0 +1,12 @@
+[rabbitmq]
+connect_string = "amqp://guest:guest@localhost:5672/"
+
+[datasource]
+
+[datasource.home]
+dir = "/Users/username/tmp"
+mount = false
+
+[datasource.panda]
+dir = "/mnt/panda"
+mount = true
