@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha1"
 	"fmt"
 	"io"
 	"log"
@@ -23,9 +22,12 @@ func readConfig() {
 	}
 }
 
-const exchange = "pubsub"
+const exchange = "tasks"
 
-type message []byte
+type message struct {
+	Body []byte
+	RoutingKey string
+}
 
 type session struct {
 	*amqp.Connection
@@ -64,8 +66,8 @@ func redial(ctx context.Context, url string) chan chan session {
 				log.Fatalf("cannot create channel: %v", err)
 			}
 
-			if err := ch.ExchangeDeclare(exchange, "fanout", false, true, false, false, nil); err != nil {
-				log.Fatalf("cannot declare fanout exchange: %v", err)
+			if err := ch.ExchangeDeclare(exchange, "topic", false, true, false, false, nil); err != nil {
+				log.Fatalf("cannot declare exchange: %v", err)
 			}
 
 			select {
@@ -80,8 +82,6 @@ func redial(ctx context.Context, url string) chan chan session {
 	return sessions
 }
 
-// publish publishes messages to a reconnecting session to a fanout exchange.
-// It receives from the application specific source of messages.
 func publish(sessions chan chan session, messages <-chan message) {
 	var (
 		running bool
@@ -105,69 +105,57 @@ func publish(sessions chan chan session, messages <-chan message) {
 
 	Publish:
 		for {
-			var body message
+			var msg message
 			select {
 			case confirmed := <-confirm:
 				if !confirmed.Ack {
-					log.Printf("nack message %d, body: %q", confirmed.DeliveryTag, string(body))
+					log.Printf("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
 				}
 				reading = messages
 
-			case body = <-pending:
-				routingKey := "ignored for fanout exchanges, application dependent for other exchanges"
-				err := pub.Publish(exchange, routingKey, false, false, amqp.Publishing{
-					Body: body,
+			case msg = <-pending:
+				err := pub.Publish(exchange, msg.RoutingKey, false, false, amqp.Publishing{
+					Body: msg.Body,
 				})
 				// Retry failed delivery on the next session
 				if err != nil {
-					pending <- body
+					pending <- msg
 					pub.Close()
 					break Publish
 				}
 
-			case body, running = <-reading:
+			case msg, running = <-reading:
 				// all messages consumed
 				if !running {
 					return
 				}
 				// work on pending delivery until ack'd
-				pending <- body
+				pending <- msg
 				reading = nil
 			}
 		}
 	}
 }
 
-// identity returns the same host/process unique string for the lifetime of
-// this process so that subscriber reconnections reuse the same queue name.
-func identity() string {
-	hostname, err := os.Hostname()
-	h := sha1.New()
-	fmt.Fprint(h, hostname)
-	fmt.Fprint(h, err)
-	fmt.Fprint(h, os.Getpid())
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
-// subscribe consumes deliveries from an exclusive queue from a fanout exchange and sends to the application specific messages chan.
-func subscribe(sessions chan chan session, messages chan<- message) {
-	queue := identity()
+func subscribe(sessions chan chan session, routingKey string, messages chan<- message) {
 
 	for session := range sessions {
 		sub := <-session
 
-		if _, err := sub.QueueDeclare(queue, false, true, true, false, nil); err != nil {
+		queue, err := sub.QueueDeclare("", false, true, true, false, nil);
+		if  err != nil {
 			log.Printf("cannot consume from exclusive queue: %q, %v", queue, err)
 			return
 		}
 
-		routingKey := "application specific routing key for fancy toplogies"
-		if err := sub.QueueBind(queue, routingKey, exchange, false, nil); err != nil {
+		fmt.Printf("%v",queue)
+
+		if err := sub.QueueBind(queue.Name, routingKey, exchange, false, nil); err != nil {
 			log.Printf("cannot consume without a binding to exchange: %q, %v", exchange, err)
 			return
 		}
 
-		deliveries, err := sub.Consume(queue, "", false, true, false, false, nil)
+		deliveries, err := sub.Consume(queue.Name, "", false, true, false, false, nil)
 		if err != nil {
 			log.Printf("cannot consume from: %q, %v", queue, err)
 			return
@@ -176,7 +164,9 @@ func subscribe(sessions chan chan session, messages chan<- message) {
 		log.Printf("subscribed...")
 
 		for msg := range deliveries {
-			messages <- message(msg.Body)
+			var new_msg message
+			new_msg.Body = msg.Body
+			messages <- new_msg
 			sub.Ack(msg.DeliveryTag, false)
 		}
 	}
@@ -188,20 +178,23 @@ func read(r io.Reader) <-chan message {
 		defer close(lines)
 		scan := bufio.NewScanner(r)
 		for scan.Scan() {
-			lines <- message(scan.Bytes())
+			var msg message
+			msg.Body = scan.Bytes()
+			msg.RoutingKey = "panda.home"
+			lines <- msg
 		}
 	}()
 	return lines
 }
 
 func write(w io.Writer) chan<- message {
-	lines := make(chan message)
+	msgs := make(chan message)
 	go func() {
-		for line := range lines {
-			fmt.Fprintln(w, string(line))
+		for msg := range msgs {
+			fmt.Fprintln(w, string(msg.Body))
 		}
 	}()
-	return lines
+	return msgs
 }
 
 func main() {
@@ -215,7 +208,19 @@ func main() {
 	}()
 
 	go func() {
-		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), write(os.Stdout))
+		for k := range viper.Get("datasource").(map[string]interface{}) {
+
+			if(viper.GetBool(fmt.Sprintf("datasource.%s.write",k))) {
+				log.Printf("%v is writeable",k)
+
+				for k2 := range viper.Get("datasource").(map[string]interface{}) {
+					if k2 != k {
+						subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), fmt.Sprintf("%s.%s",k2,k), write(os.Stdout))
+					}
+				}
+			}
+		}
+
 		done()
 	}()
 

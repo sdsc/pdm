@@ -4,9 +4,11 @@ connect_string = "amqp://guest:guest@localhost:5672/"
 [datasource]
 
 [datasource.home]
-dir = "/Users/username/tmp"
+path = "/Users/username/tmp"
 mount = false
+write = true
 
 [datasource.panda]
-dir = "/mnt/panda"
+path = "/mnt/panda"
 mount = true
+write = false
