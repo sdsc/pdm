@@ -142,7 +142,7 @@ func publish(sessions chan chan session, messages <-chan message) {
 	}
 }
 
-func subscribe(sessions chan chan session, messages chan<- message) {
+func subscribe(sessions chan chan session, file_messages chan<- message, folder_messages chan<- message) {
 
 	for session := range sessions {
 		sub := <-session
@@ -196,7 +196,7 @@ func subscribe(sessions chan chan session, messages chan<- message) {
 							for msg := range deliveriesFile {
 								var new_msg message
 								new_msg.Body = msg.Body
-								messages <- new_msg
+								file_messages <- new_msg
 								sub.Ack(msg.DeliveryTag, false)
 							}
 						}()
@@ -205,7 +205,7 @@ func subscribe(sessions chan chan session, messages chan<- message) {
 							for msg := range deliveriesDir {
 								var new_msg message
 								new_msg.Body = msg.Body
-								messages <- new_msg
+								folder_messages <- new_msg
 								sub.Ack(msg.DeliveryTag, false)
 							}
 						}()
@@ -232,12 +232,24 @@ func read(r io.Reader) <-chan message {
 	return ret_chan
 }
 
-func write(w io.Writer) chan<- message {
+func processFiles() chan<- message {
 	msgs := make(chan message)
 	for i := 0; i <= viper.GetInt("file_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				fmt.Fprintln(w, "Worker", i, string(msg.Body))
+				log.Print("File Worker ", i, " ", string(msg.Body))
+			}
+		}(i)
+	}
+	return msgs
+}
+
+func processFolders() chan<- message {
+	msgs := make(chan message)
+	for i := 0; i <= viper.GetInt("folder_workers"); i++ {
+		go func(i int) {
+			for msg := range msgs {
+				log.Print("Folder Worker ", i, " ", string(msg.Body))
 			}
 		}(i)
 	}
@@ -255,7 +267,7 @@ func main() {
 	}()
 
 	go func() {
-		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), write(os.Stdout))
+		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFiles(), processFolders())
 		done()
 	}()
 
