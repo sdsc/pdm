@@ -17,6 +17,10 @@ func readConfig() {
 	viper.SetConfigName("config")
 	viper.AddConfigPath("$HOME/.pdm")
 	viper.AddConfigPath(".")
+
+	viper.SetDefault("dir_workers", 2)
+	viper.SetDefault("file_workers", 2)
+
 	err := viper.ReadInConfig()
 	if err != nil {
 		panic(fmt.Errorf("Fatal error config file: %s \n", err))
@@ -149,30 +153,56 @@ func subscribe(sessions chan chan session, messages chan<- message) {
 			if(viper.GetBool(fmt.Sprintf("datasource.%s.write",k))) {
 				for k2 := range viper.Get("datasource").(map[string]interface{}) {
 					if k2 != k {
-						routingKey := fmt.Sprintf("%s.%s",k2,k) 
+						routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s",k2,k), fmt.Sprintf("dir.%s.%s",k2,k) 
 
-						queue, err := sub.QueueDeclare("", false, true, true, false, nil);
+						queueFile, err := sub.QueueDeclare("", false, true, true, false, nil);
 						if  err != nil {
-							log.Printf("cannot consume from exclusive queue: %q, %v", queue, err)
+							log.Printf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 							return
 						}
-						
-						if err := sub.QueueBind(queue.Name, routingKey, exchange, false, nil); err != nil {
+
+						if err := sub.QueueBind(queueFile.Name, routingKeyFile, exchange, false, nil); err != nil {
 							log.Printf("cannot consume without a binding to exchange: %q, %v", exchange, err)
 							return
 						}
 
-						deliveries, err := sub.Consume(queue.Name, "", false, true, false, false, nil)
+						deliveriesFile, err := sub.Consume(queueFile.Name, "", false, true, false, false, nil)
 						if err != nil {
-							log.Printf("cannot consume from: %q, %v", queue, err)
+							log.Printf("cannot consume from: %q, %v", queueFile, err)
 							return
 						}
 
-						wg.Add(1)
+						queueDir, err := sub.QueueDeclare("", false, true, true, false, nil);
+						if  err != nil {
+							log.Printf("cannot consume from exclusive queue: %q, %v", queueDir, err)
+							return
+						}
+
+						if err := sub.QueueBind(queueDir.Name, routingKeyDir, exchange, false, nil); err != nil {
+							log.Printf("cannot consume without a binding to exchange: %q, %v", exchange, err)
+							return
+						}
+
+						deliveriesDir, err := sub.Consume(queueDir.Name, "", false, true, false, false, nil)
+						if err != nil {
+							log.Printf("cannot consume from: %q, %v", queueDir, err)
+							return
+						}
+
+						wg.Add(2)
 
 						go func() {
 							defer wg.Done()
-							for msg := range deliveries {
+							for msg := range deliveriesFile {
+								var new_msg message
+								new_msg.Body = msg.Body
+								messages <- new_msg
+								sub.Ack(msg.DeliveryTag, false)
+							}
+						}()
+						go func() {
+							defer wg.Done()
+							for msg := range deliveriesDir {
 								var new_msg message
 								new_msg.Body = msg.Body
 								messages <- new_msg
@@ -188,27 +218,29 @@ func subscribe(sessions chan chan session, messages chan<- message) {
 }
 
 func read(r io.Reader) <-chan message {
-	lines := make(chan message)
+	ret_chan := make(chan message)
 	go func() {
-		defer close(lines)
+		defer close(ret_chan)
 		scan := bufio.NewScanner(r)
 		for scan.Scan() {
 			var msg message
 			msg.Body = scan.Bytes()
-			msg.RoutingKey = "panda.home"
-			lines <- msg
+			msg.RoutingKey = "file.panda.home"
+			ret_chan <- msg
 		}
 	}()
-	return lines
+	return ret_chan
 }
 
 func write(w io.Writer) chan<- message {
 	msgs := make(chan message)
-	go func() {
-		for msg := range msgs {
-			fmt.Fprintln(w, string(msg.Body))
-		}
-	}()
+	for i := 0; i <= viper.GetInt("file_workers"); i++ {
+		go func(i int) {
+			for msg := range msgs {
+				fmt.Fprintln(w, "Worker", i, string(msg.Body))
+			}
+		}(i)
+	}
 	return msgs
 }
 
@@ -226,5 +258,6 @@ func main() {
 		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), write(os.Stdout))
 		done()
 	}()
+
 	<-ctx.Done()
 }
