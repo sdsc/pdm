@@ -7,11 +7,20 @@ import (
 	"log"
 	"os"
 	"sync"
+	//"path"
+	"encoding/json"
 
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
 	"github.com/spf13/viper"
 )
+
+type storage_backend interface {
+    process_files(from_datastorage string, to_datastorage string, files []string)
+    process_folder(from_datastorage string, to_datastorage string, folder string)
+    clear_files(from_datastorage string, to_datastorage string, files []string)
+    clear_folder(from_datastorage string, to_datastorage string, folder string)
+}
 
 func readConfig() {
 	viper.SetConfigName("config")
@@ -32,6 +41,11 @@ const exchange = "tasks"
 type message struct {
 	Body []byte
 	RoutingKey string
+}
+
+type task struct {
+	Action string `json:"action"`
+	ItemPath string `json:"item_path"`
 }
 
 type session struct {
@@ -237,7 +251,13 @@ func processFiles() chan<- message {
 	for i := 0; i <= viper.GetInt("file_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				log.Print("File Worker ", i, " ", string(msg.Body))
+				var cur_task task
+				err := json.Unmarshal(msg.Body, &cur_task)
+				if err != nil {
+					log.Printf("Error parsing message: %s", msg.Body)
+					continue
+				}
+				log.Print("File Worker ", i, " ", cur_task.Action," ",cur_task.ItemPath)
 			}
 		}(i)
 	}
@@ -249,7 +269,13 @@ func processFolders() chan<- message {
 	for i := 0; i <= viper.GetInt("folder_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				log.Print("Folder Worker ", i, " ", string(msg.Body))
+				var cur_task task
+				err := json.Unmarshal(msg.Body, &cur_task)
+				if err != nil {
+					log.Printf("Error parsing message: %s", msg.Body)
+					continue
+				}
+				log.Print("Folder Worker ", i, " ", cur_task)
 			}
 		}(i)
 	}
