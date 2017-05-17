@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
@@ -137,38 +138,52 @@ func publish(sessions chan chan session, messages <-chan message) {
 	}
 }
 
-func subscribe(sessions chan chan session, routingKey string, messages chan<- message) {
+func subscribe(sessions chan chan session, messages chan<- message) {
 
 	for session := range sessions {
 		sub := <-session
 
-		queue, err := sub.QueueDeclare("", false, true, true, false, nil);
-		if  err != nil {
-			log.Printf("cannot consume from exclusive queue: %q, %v", queue, err)
-			return
+		var wg sync.WaitGroup
+
+		for k := range viper.Get("datasource").(map[string]interface{}) {
+			if(viper.GetBool(fmt.Sprintf("datasource.%s.write",k))) {
+				for k2 := range viper.Get("datasource").(map[string]interface{}) {
+					if k2 != k {
+						routingKey := fmt.Sprintf("%s.%s",k2,k) 
+
+						queue, err := sub.QueueDeclare("", false, true, true, false, nil);
+						if  err != nil {
+							log.Printf("cannot consume from exclusive queue: %q, %v", queue, err)
+							return
+						}
+						
+						if err := sub.QueueBind(queue.Name, routingKey, exchange, false, nil); err != nil {
+							log.Printf("cannot consume without a binding to exchange: %q, %v", exchange, err)
+							return
+						}
+
+						deliveries, err := sub.Consume(queue.Name, "", false, true, false, false, nil)
+						if err != nil {
+							log.Printf("cannot consume from: %q, %v", queue, err)
+							return
+						}
+
+						wg.Add(1)
+
+						go func() {
+							defer wg.Done()
+							for msg := range deliveries {
+								var new_msg message
+								new_msg.Body = msg.Body
+								messages <- new_msg
+								sub.Ack(msg.DeliveryTag, false)
+							}
+						}()
+					}
+				}
+			}
 		}
-
-		fmt.Printf("%v",queue)
-
-		if err := sub.QueueBind(queue.Name, routingKey, exchange, false, nil); err != nil {
-			log.Printf("cannot consume without a binding to exchange: %q, %v", exchange, err)
-			return
-		}
-
-		deliveries, err := sub.Consume(queue.Name, "", false, true, false, false, nil)
-		if err != nil {
-			log.Printf("cannot consume from: %q, %v", queue, err)
-			return
-		}
-
-		log.Printf("subscribed...")
-
-		for msg := range deliveries {
-			var new_msg message
-			new_msg.Body = msg.Body
-			messages <- new_msg
-			sub.Ack(msg.DeliveryTag, false)
-		}
+		wg.Wait()
 	}
 }
 
@@ -208,21 +223,8 @@ func main() {
 	}()
 
 	go func() {
-		for k := range viper.Get("datasource").(map[string]interface{}) {
-
-			if(viper.GetBool(fmt.Sprintf("datasource.%s.write",k))) {
-				log.Printf("%v is writeable",k)
-
-				for k2 := range viper.Get("datasource").(map[string]interface{}) {
-					if k2 != k {
-						subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), fmt.Sprintf("%s.%s",k2,k), write(os.Stdout))
-					}
-				}
-			}
-		}
-
+		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), write(os.Stdout))
 		done()
 	}()
-
 	<-ctx.Done()
 }
