@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"flag"
 	"io"
 	"os"
 	"strings"
@@ -26,7 +27,7 @@ type storage_backend interface {
 	Chmod(filePath string, perm os.FileMode) error
 }
 
-func readConfig() {
+func readWorkerConfig() {
 	viper.SetConfigName("config")
 	viper.AddConfigPath("$HOME/.pdm")
 	viper.AddConfigPath(".")
@@ -243,9 +244,7 @@ func read(r io.Reader) <-chan message {
 		defer close(ret_chan)
 		scan := bufio.NewScanner(r)
 		for scan.Scan() {
-			var msg message
-			msg.Body = scan.Bytes()
-			msg.RoutingKey = "file.home.home2"
+			var msg = message{scan.Bytes(), "file.home.home2"}
 			ret_chan <- msg
 		}
 	}()
@@ -361,35 +360,66 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 }
 
 func main() {
-	readConfig()
-
-	for k := range viper.Get("datasource").(map[string]interface{}) {
-		switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
-		case "lustre":
-			data_backends[k] = LustreDatastore{
-				viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
-		case "posix":
-			data_backends[k] = PosixDatastore{
-				viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
-		}
-	}
-	log.Print(data_backends)
 
 	ctx, done := context.WithCancel(context.Background())
 
-	go func() {
-		publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), read(os.Stdin))
-		done()
-	}()
+	isWorkerParam := flag.Bool("worker", false, "Run a worker")
+	rabbitmqServerParam := flag.String("rabbitmq", "", "RABBITMQ server connect string")
+	flag.Parse()
 
-	go func() {
-		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(), processFoldersStream())
-		done()
-	}()
+
+	if *isWorkerParam {
+		readWorkerConfig()
+
+		for k := range viper.Get("datasource").(map[string]interface{}) {
+			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
+			case "lustre":
+				data_backends[k] = LustreDatastore{
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
+			case "posix":
+				data_backends[k] = PosixDatastore{
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
+			}
+		}
+
+
+		go func() {
+			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), read(os.Stdin))
+			done()
+		}()
+
+		go func() {
+			subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(), processFoldersStream())
+			done()
+		}()
+
+	} else {
+		rabbitmqServer := ""
+
+		if(os.Getenv("PDM_RABBITMQ") != "") {
+			rabbitmqServer = os.Getenv("PDM_RABBITMQ")
+		} else if(*rabbitmqServerParam != "") {
+			rabbitmqServer = *rabbitmqServerParam
+		}
+
+		pub_chan := make(chan message)
+		defer close(pub_chan)
+		debug("Publishing1")
+
+		go func() {
+			var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"/filelock.py\"]}"), "file.home.home2"}
+			pub_chan <- msg
+			debug("Publishing2")
+		}()
+
+		publish(redial(ctx, rabbitmqServer), pub_chan)
+		debug("Publiched")
+	}
 
 	<-ctx.Done()
+
 }
