@@ -5,18 +5,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"sync"
+	"log"
+	. "github.com/tj/go-debug"
 
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
+	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 )
 
 type storage_backend interface {
 	GetFileMetadata(filepath string) (os.FileInfo, error)
+	Remove(filePath string) error
+	Open(filePath string) (io.Reader, error)
+	Create(filePath string) (io.Writer, error)
+	Lchown(filePath string, uid, gid int) error
+	Chmod(filePath string, perm os.FileMode) error
 }
 
 func readConfig() {
@@ -34,6 +41,8 @@ func readConfig() {
 }
 
 const exchange = "tasks"
+
+var debug = Debug("worker")
 
 var data_backends = make(map[string]storage_backend)
 
@@ -288,16 +297,66 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			log.Print("Error reading file metadata: ", err)
 		}
 
-		log.Print("For file ", filepath, " got meta ", sourceFileMeta)
+		debug("For file %s got meta %#v", filepath, sourceFileMeta)
 
-		// src, err := os.Open("source")
-		// process(err)
-		// dest, err := os.Create("destination")
-		// process(err)
-		// err := io.Copy(dest, src)
-		// process(err)
-		// {"action":"copy", "item_path":["/Users/dimm/go/src/github.com/dimm0/pdm/config.toml"]}
+		//TODO: check date
 
+		switch mode := sourceFileMeta.Mode(); {
+		case mode.IsRegular():
+			//TODO: check stripes
+
+			if destFileMeta, err := toDataStore.GetFileMetadata(filepath); err == nil { // the dest file exists
+				if sourceFileMeta.Size() == destFileMeta.Size() &&
+					sourceFileMeta.ModTime() == destFileMeta.ModTime() &&
+					sourceFileMeta.Mode() == destFileMeta.Mode() {
+					debug("File ", filepath, " hasn't been changed")
+					return
+				}
+				err = toDataStore.Remove(filepath)
+				if err != nil {
+					log.Print("Error removing file %s: %s", filepath, err)
+					continue
+				}
+
+				// TODO: setstripe
+			}
+
+			src, err := fromDataStore.Open(filepath)
+			if err != nil {
+				log.Printf("Error opening src file %s: %s", filepath, err)
+				continue
+			}
+			dest, err := toDataStore.Create(filepath)
+			if err != nil {
+				log.Printf("Error opening dst file %s: %s", filepath, err)
+				continue
+			}
+			copiedData, err := bufioprop.Copy(dest, src, 1048559)
+			if err != nil {
+				log.Printf("Error copying file %s: %s", filepath, err)
+				continue
+			}
+
+			// toDataStore.Lchown(filepath, mode&os.ModeSetuid, mode&os.ModeSetgid)
+			// toDataStore.Chmod(filepath, syscallMode(perm))
+
+			debug("Done copying %s: %d bytes", filepath, copiedData)
+
+			//{"action":"copy", "item_path":["/filelock.py"]} 
+			// {"action":"copy", "item_path":["/noc-x86_64-Debian-8.ova"]}
+
+
+            // copied_data = self.bcopy(src, dst, blksize)
+            // os.chmod(dst, srcstat.st_mode)
+            // os.utime(dst, (srcstat.st_atime, srcstat.st_mtime))
+
+		case mode.IsDir():
+			// shouldn't happen
+		case mode&os.ModeSymlink != 0:
+			fmt.Println("symbolic link")
+		case mode&os.ModeNamedPipe != 0:
+			fmt.Println("named pipe")
+		}
 	}
 }
 

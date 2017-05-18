@@ -2,19 +2,36 @@ package main
 
 import (
 	"os"
+	"io"
+	"path"
 )
 
 type PosixDatastore struct {
-	path  string
-	mount bool
-	write bool
+	mountPath   string
+	shouldMount bool
+	canWrite    bool
 }
 
-func (l PosixDatastore) GetFileMetadata(filepath string) (os.FileInfo, error) {
-	fi, err := os.Stat(filepath)
+func (l PosixDatastore) GetFileMetadata(filePath string) (os.FileInfo, error) {
+	return os.Stat(path.Join(l.mountPath, filePath))
+}
 
-	if err != nil {
-		return nil, err
-	}
-	return fi, nil
+func (l PosixDatastore) Remove(filePath string) error {
+	return os.Remove(path.Join(l.mountPath, filePath))
+}
+
+func (l PosixDatastore) Open(filePath string) (io.Reader, error) {
+	return os.Open(path.Join(l.mountPath, filePath))
+}
+
+func (l PosixDatastore) Create(filePath string) (io.Writer, error) {
+	return os.Create(path.Join(l.mountPath, filePath))
+}
+
+func (l PosixDatastore) Lchown(filePath string, uid, gid int) error {
+	return os.Lchown(path.Join(l.mountPath, filePath), uid, gid)
+}
+
+func (l PosixDatastore) Chmod(filePath string, perm os.FileMode) error {
+	return os.Chmod(path.Join(l.mountPath, filePath), perm)
 }
