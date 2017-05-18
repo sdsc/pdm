@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 	"sync"
-	//"path"
+	"strings"
 	"encoding/json"
 
 	"github.com/streadway/amqp"
@@ -16,10 +16,7 @@ import (
 )
 
 type storage_backend interface {
-    process_files(from_datastorage string, to_datastorage string, files []string)
-    process_folder(from_datastorage string, to_datastorage string, folder string)
-    clear_files(from_datastorage string, to_datastorage string, files []string)
-    clear_folder(from_datastorage string, to_datastorage string, folder string)
+    GetFileMetadata(filepath string) (os.FileInfo, error)
 }
 
 func readConfig() {
@@ -38,6 +35,8 @@ func readConfig() {
 
 const exchange = "tasks"
 
+var data_backends = make(map[string]storage_backend)
+
 type message struct {
 	Body []byte
 	RoutingKey string
@@ -45,7 +44,7 @@ type message struct {
 
 type task struct {
 	Action string `json:"action"`
-	ItemPath string `json:"item_path"`
+	ItemPath []string `json:"item_path"`
 }
 
 type session struct {
@@ -208,8 +207,7 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 						go func() {
 							defer wg.Done()
 							for msg := range deliveriesFile {
-								var new_msg message
-								new_msg.Body = msg.Body
+								var new_msg = message{msg.Body, msg.RoutingKey}
 								file_messages <- new_msg
 								sub.Ack(msg.DeliveryTag, false)
 							}
@@ -217,8 +215,7 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 						go func() {
 							defer wg.Done()
 							for msg := range deliveriesDir {
-								var new_msg message
-								new_msg.Body = msg.Body
+								var new_msg = message{msg.Body, msg.RoutingKey}
 								folder_messages <- new_msg
 								sub.Ack(msg.DeliveryTag, false)
 							}
@@ -239,32 +236,34 @@ func read(r io.Reader) <-chan message {
 		for scan.Scan() {
 			var msg message
 			msg.Body = scan.Bytes()
-			msg.RoutingKey = "file.panda.home"
+			msg.RoutingKey = "file.home.home2"
 			ret_chan <- msg
 		}
 	}()
 	return ret_chan
 }
 
-func processFiles() chan<- message {
+func processFilesStream() chan<- message {
 	msgs := make(chan message)
 	for i := 0; i <= viper.GetInt("file_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
 				var cur_task task
+				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
+				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
 				err := json.Unmarshal(msg.Body, &cur_task)
 				if err != nil {
-					log.Printf("Error parsing message: %s", msg.Body)
+					log.Printf("Error parsing message: %s from %s", msg.Body, msg.RoutingKey)
 					continue
 				}
-				log.Print("File Worker ", i, " ", cur_task.Action," ",cur_task.ItemPath)
+				processFiles(fromDataStore, toDataStore, cur_task)
 			}
 		}(i)
 	}
 	return msgs
 }
 
-func processFolders() chan<- message {
+func processFoldersStream() chan<- message {
 	msgs := make(chan message)
 	for i := 0; i <= viper.GetInt("folder_workers"); i++ {
 		go func(i int) {
@@ -282,8 +281,44 @@ func processFolders() chan<- message {
 	return msgs
 }
 
+func processFiles(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
+	for _, filepath := range taskStruct.ItemPath {
+		sourceFileMeta, err := fromDataStore.GetFileMetadata(filepath)
+		if err != nil {
+			log.Print("Error reading file metadata: ", err)
+		}
+
+		log.Print("For file ", filepath, " got meta ",  sourceFileMeta)
+
+		// src, err := os.Open("source") 
+		// process(err) 
+		// dest, err := os.Create("destination") 
+		// process(err) 
+		// err := io.Copy(dest, src) 
+		// process(err) 
+		// {"action":"copy", "item_path":["/Users/dimm/go/src/github.com/dimm0/pdm/config.toml"]}
+
+	}
+}
+
 func main() {
 	readConfig()
+
+	for k := range viper.Get("datasource").(map[string]interface{}) {
+		switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type",k)); datastore_type {
+		case "lustre":
+			data_backends[k] = LustreDatastore{
+				viper.GetString(fmt.Sprintf("datasource.%s.path",k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.mount",k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.write",k))}
+		case "posix":
+			data_backends[k] = PosixDatastore{
+				viper.GetString(fmt.Sprintf("datasource.%s.path",k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.mount",k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.write",k))}
+		}
+	}
+	log.Print(data_backends)
 
 	ctx, done := context.WithCancel(context.Background())
 
@@ -293,7 +328,7 @@ func main() {
 	}()
 
 	go func() {
-		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFiles(), processFolders())
+		subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(), processFoldersStream())
 		done()
 	}()
 
