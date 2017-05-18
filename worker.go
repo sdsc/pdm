@@ -2,21 +2,21 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
-	"sync"
 	"strings"
-	"encoding/json"
+	"sync"
 
+	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
-	"github.com/spf13/viper"
 )
 
 type storage_backend interface {
-    GetFileMetadata(filepath string) (os.FileInfo, error)
+	GetFileMetadata(filepath string) (os.FileInfo, error)
 }
 
 func readConfig() {
@@ -38,12 +38,12 @@ const exchange = "tasks"
 var data_backends = make(map[string]storage_backend)
 
 type message struct {
-	Body []byte
+	Body       []byte
 	RoutingKey string
 }
 
 type task struct {
-	Action string `json:"action"`
+	Action   string   `json:"action"`
 	ItemPath []string `json:"item_path"`
 }
 
@@ -163,13 +163,13 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 		var wg sync.WaitGroup
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
-			if(viper.GetBool(fmt.Sprintf("datasource.%s.write",k))) {
+			if viper.GetBool(fmt.Sprintf("datasource.%s.write", k)) {
 				for k2 := range viper.Get("datasource").(map[string]interface{}) {
 					if k2 != k {
-						routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s",k2,k), fmt.Sprintf("dir.%s.%s",k2,k) 
+						routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
 
-						queueFile, err := sub.QueueDeclare("", false, true, true, false, nil);
-						if  err != nil {
+						queueFile, err := sub.QueueDeclare("", false, true, true, false, nil)
+						if err != nil {
 							log.Printf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 							return
 						}
@@ -185,8 +185,8 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 							return
 						}
 
-						queueDir, err := sub.QueueDeclare("", false, true, true, false, nil);
-						if  err != nil {
+						queueDir, err := sub.QueueDeclare("", false, true, true, false, nil)
+						if err != nil {
 							log.Printf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 							return
 						}
@@ -288,14 +288,14 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			log.Print("Error reading file metadata: ", err)
 		}
 
-		log.Print("For file ", filepath, " got meta ",  sourceFileMeta)
+		log.Print("For file ", filepath, " got meta ", sourceFileMeta)
 
-		// src, err := os.Open("source") 
-		// process(err) 
-		// dest, err := os.Create("destination") 
-		// process(err) 
-		// err := io.Copy(dest, src) 
-		// process(err) 
+		// src, err := os.Open("source")
+		// process(err)
+		// dest, err := os.Create("destination")
+		// process(err)
+		// err := io.Copy(dest, src)
+		// process(err)
 		// {"action":"copy", "item_path":["/Users/dimm/go/src/github.com/dimm0/pdm/config.toml"]}
 
 	}
@@ -305,17 +305,17 @@ func main() {
 	readConfig()
 
 	for k := range viper.Get("datasource").(map[string]interface{}) {
-		switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type",k)); datastore_type {
+		switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
 		case "lustre":
 			data_backends[k] = LustreDatastore{
-				viper.GetString(fmt.Sprintf("datasource.%s.path",k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.mount",k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.write",k))}
+				viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
 		case "posix":
 			data_backends[k] = PosixDatastore{
-				viper.GetString(fmt.Sprintf("datasource.%s.path",k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.mount",k)),
-				viper.GetBool(fmt.Sprintf("datasource.%s.write",k))}
+				viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
+				viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
 		}
 	}
 	log.Print(data_backends)

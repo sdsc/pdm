@@ -5,15 +5,15 @@ import (
 )
 
 type LustreDatastore struct {
-	path string
+	path  string
 	mount bool
 	write bool
 }
 
-func (l LustreDatastore) GetFileMetadata(filepath string) (os.FileInfo, error)  {
+func (l LustreDatastore) GetFileMetadata(filepath string) (os.FileInfo, error) {
 	fi, err := os.Stat(filepath)
-    if err != nil {
-        return nil, err
-    }
-    return fi, nil
+	if err != nil {
+		return nil, err
+	}
+	return fi, nil
 }
