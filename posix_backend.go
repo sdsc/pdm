@@ -12,7 +12,7 @@ type PosixDatastore struct {
 	canWrite    bool
 }
 
-func (l PosixDatastore) GetFileMetadata(filePath string) (os.FileInfo, error) {
+func (l PosixDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
 	return os.Stat(path.Join(l.mountPath, filePath))
 }
 
@@ -34,4 +34,8 @@ func (l PosixDatastore) Lchown(filePath string, uid, gid int) error {
 
 func (l PosixDatastore) Chmod(filePath string, perm os.FileMode) error {
 	return os.Chmod(path.Join(l.mountPath, filePath), perm)
+}
+
+func (l PosixDatastore) Mkdir(dirPath string, perm os.FileMode) error {
+	return os.Mkdir(path.Join(l.mountPath, dirPath), perm)
 }

@@ -19,12 +19,13 @@ import (
 )
 
 type storage_backend interface {
-	GetFileMetadata(filepath string) (os.FileInfo, error)
+	GetMetadata(filepath string) (os.FileInfo, error)
 	Remove(filePath string) error
 	Open(filePath string) (io.Reader, error)
 	Create(filePath string) (io.Writer, error)
 	Lchown(filePath string, uid, gid int) error
 	Chmod(filePath string, perm os.FileMode) error
+	Mkdir(dirPath string, perm os.FileMode) error
 }
 
 func readWorkerConfig() {
@@ -277,12 +278,14 @@ func processFoldersStream() chan<- message {
 		go func(i int) {
 			for msg := range msgs {
 				var cur_task task
+				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
+				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
 				err := json.Unmarshal(msg.Body, &cur_task)
 				if err != nil {
 					log.Printf("Error parsing message: %s", msg.Body)
 					continue
 				}
-				log.Print("Folder Worker ", i, " ", cur_task)
+				processFolder(fromDataStore, toDataStore, cur_task)
 			}
 		}(i)
 	}
@@ -291,7 +294,7 @@ func processFoldersStream() chan<- message {
 
 func processFiles(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
 	for _, filepath := range taskStruct.ItemPath {
-		sourceFileMeta, err := fromDataStore.GetFileMetadata(filepath)
+		sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 		if err != nil {
 			log.Print("Error reading file metadata: ", err)
 		}
@@ -304,7 +307,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		case mode.IsRegular():
 			//TODO: check stripes
 
-			if destFileMeta, err := toDataStore.GetFileMetadata(filepath); err == nil { // the dest file exists
+			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
 				if sourceFileMeta.Size() == destFileMeta.Size() &&
 					sourceFileMeta.ModTime() == destFileMeta.ModTime() &&
 					sourceFileMeta.Mode() == destFileMeta.Mode() {
@@ -359,6 +362,37 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 	}
 }
 
+func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
+	debug("Processing folder!")
+	dirPath := taskStruct.ItemPath[0]		
+	sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
+	if err != nil {
+		log.Print("Error reading folder metadata or source folder not exists: ", err)
+		return
+	}
+
+	debug("Processing folder! 1")
+	if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
+		debug("%v",destDirMeta)
+	} else {
+		level := len(strings.Split(dirPath, "/"))
+		if(level > 1) {
+			toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
+		}
+	}
+	debug("Processing folder! 2")
+
+    // if(sstat.st_mode != dstat.st_mode):
+    //     os.chmod(destdir, sstat.st_mode)
+    // if((sstat.st_uid != dstat.st_uid) or (sstat.st_gid != dstat.st_gid)):
+    //     os.chown(destdir, sstat.st_uid, sstat.st_gid)
+    
+    // slayout = lustreapi.getstripe(sourcedir)
+    // dlayout = lustreapi.getstripe(destdir)
+    // if slayout.isstriped() != dlayout.isstriped() or slayout.stripecount != dlayout.stripecount:
+    //     lustreapi.setstripe(destdir, stripecount=slayout.stripecount)
+}
+
 func main() {
 
 	ctx, done := context.WithCancel(context.Background())
@@ -411,7 +445,8 @@ func main() {
 		debug("Publishing1")
 
 		go func() {
-			var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"/filelock.py\"]}"), "file.home.home2"}
+			// var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"/filelock.py\"]}"), "file.home.home2"}
+			var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"/gui\"]}"), "dir.home.home2"}
 			pub_chan <- msg
 			debug("Publishing2")
 		}()

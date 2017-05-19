@@ -13,7 +13,7 @@ type LustreDatastore struct {
 	canWrite    bool
 }
 
-func (l LustreDatastore) GetFileMetadata(filePath string) (os.FileInfo, error) {
+func (l LustreDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
 	// fid, err := Path2Fid(filepath)
 	// if err != nil {
 	// 	return nil, err
@@ -40,4 +40,8 @@ func (l LustreDatastore) Lchown(filePath string, uid, gid int) error {
 
 func (l LustreDatastore) Chmod(filePath string, perm os.FileMode) error {
 	return os.Chmod(path.Join(l.mountPath, filePath), perm)
+}
+
+func (l LustreDatastore) Mkdir(dirPath string, perm os.FileMode) error {
+	return os.Mkdir(path.Join(l.mountPath, dirPath), perm)
 }
