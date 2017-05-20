@@ -385,6 +385,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	}
 	debug("Processing folder! 2")
 
+	//TODO check if this is needed!
 	toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
 	toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
     // if(sstat.st_mode != dstat.st_mode):
@@ -464,7 +465,8 @@ func main() {
 
 		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\""+*pathParam+"\"]}"), queuePrefix+".home.home2"}
 		pub_chan <- msg
-		time.Sleep(1000)
+
+		time.Sleep(1000) // TODO: do something better
 		done()
 	}
 
