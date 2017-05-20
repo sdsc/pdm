@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"flag"
 	"io"
 	"os"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 type storage_backend interface {
@@ -393,16 +393,22 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
     //     lustreapi.setstripe(destdir, stripecount=slayout.stripecount)
 }
 
-func main() {
+var (
+	app      = kingpin.New("pdm", "Parallel data mover.")
 
+	worker     = app.Command("worker", "Run a worker")
+
+	copy        = app.Command("copy", "Copy a folder or a file")
+	rabbitmqServerParam = copy.Flag("rabbitmq", "RabbitMQ connect string.").String()
+	isFileParam = copy.Flag("file", "Copy a file.").Bool()
+	pathParam    = copy.Arg("path", "The path to copy").Required().String()
+)
+
+func main() {
 	ctx, done := context.WithCancel(context.Background())
 
-	isWorkerParam := flag.Bool("worker", false, "Run a worker")
-	rabbitmqServerParam := flag.String("rabbitmq", "", "RABBITMQ server connect string")
-	flag.Parse()
-
-
-	if *isWorkerParam {
+	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
+	case worker.FullCommand():
 		readWorkerConfig()
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
@@ -430,8 +436,11 @@ func main() {
 			subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(), processFoldersStream())
 			done()
 		}()
+		
 
-	} else {
+	case copy.FullCommand():
+
+
 		rabbitmqServer := ""
 
 		if(os.Getenv("PDM_RABBITMQ") != "") {
@@ -442,17 +451,17 @@ func main() {
 
 		pub_chan := make(chan message)
 		defer close(pub_chan)
-		debug("Publishing1")
 
 		go func() {
-			// var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"/filelock.py\"]}"), "file.home.home2"}
-			var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"/gui\"]}"), "dir.home.home2"}
-			pub_chan <- msg
-			debug("Publishing2")
+			publish(redial(ctx, rabbitmqServer), pub_chan)
 		}()
 
-		publish(redial(ctx, rabbitmqServer), pub_chan)
-		debug("Publiched")
+		queuePrefix := "dir"
+		if *isFileParam {queuePrefix = "file"}
+
+		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\""+*pathParam+"\"]}"), queuePrefix+".home.home2"}
+		pub_chan <- msg
+		done()
 	}
 
 	<-ctx.Done()
