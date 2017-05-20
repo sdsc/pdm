@@ -10,6 +10,8 @@ import (
 	"sync"
 	"log"
 	. "github.com/tj/go-debug"
+	"time"
+	"syscall"
 
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
@@ -299,7 +301,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			log.Print("Error reading file metadata: ", err)
 		}
 
-		debug("For file %s got meta %#v", filepath, sourceFileMeta)
+		//debug("For file %s got meta %#v", filepath, sourceFileMeta)
 
 		//TODO: check date
 
@@ -314,6 +316,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					debug("File ", filepath, " hasn't been changed")
 					return
 				}
+				debug("Removing file %s",filepath)
 				err = toDataStore.Remove(filepath)
 				if err != nil {
 					log.Print("Error removing file %s: %s", filepath, err)
@@ -339,8 +342,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				continue
 			}
 
-			// toDataStore.Lchown(filepath, mode&os.ModeSetuid, mode&os.ModeSetgid)
-			// toDataStore.Chmod(filepath, syscallMode(perm))
+			toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
+			toDataStore.Chmod(filepath, sourceFileMeta.Mode())
 
 			debug("Done copying %s: %d bytes", filepath, copiedData)
 
@@ -382,6 +385,8 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	}
 	debug("Processing folder! 2")
 
+	toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
+	toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
     // if(sstat.st_mode != dstat.st_mode):
     //     os.chmod(destdir, sstat.st_mode)
     // if((sstat.st_uid != dstat.st_uid) or (sstat.st_gid != dstat.st_gid)):
@@ -439,8 +444,6 @@ func main() {
 		
 
 	case copy.FullCommand():
-
-
 		rabbitmqServer := ""
 
 		if(os.Getenv("PDM_RABBITMQ") != "") {
@@ -461,6 +464,7 @@ func main() {
 
 		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\""+*pathParam+"\"]}"), queuePrefix+".home.home2"}
 		pub_chan <- msg
+		time.Sleep(1000)
 		done()
 	}
 
