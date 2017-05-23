@@ -7,6 +7,8 @@ import (
 	"time"
 	"bufio"
 	"path"
+	"log"
+	"path/filepath"
 )
 
 type PosixDatastore struct {
@@ -67,7 +69,13 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 		defer close(outchan)
 		if(!listFiles){
 			for scanner.Scan() {
-				outchan <- []string{scanner.Text()}
+				folder := scanner.Text()
+				rel, err := filepath.Rel(l.mountPath, folder)
+				if err != nil {
+					log.Printf("Error resolving folder %s: %v", folder, err)
+					continue
+				}
+				outchan <- []string{rel}
 			}
 		} else {
 			var filesBuf []string
@@ -76,7 +84,15 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 					outchan <- filesBuf
 					filesBuf = nil
 				}
-				filesBuf = append(filesBuf, scanner.Text())
+
+				file := scanner.Text()
+				rel, err := filepath.Rel(l.mountPath, file)
+				if err != nil {
+					log.Printf("Error resolving file %s: %v", file, err)
+					continue
+				}
+
+				filesBuf = append(filesBuf, rel)
 			}
 			if len(filesBuf) > 0 {
 				outchan <- filesBuf

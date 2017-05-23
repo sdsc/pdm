@@ -8,6 +8,8 @@ import (
 	"bufio"
 	//"github.com/intel-hpdd/go-lustre/llapi"
 	"path"
+	"log"
+	"path/filepath"
 )
 
 type LustreDatastore struct {
@@ -17,11 +19,6 @@ type LustreDatastore struct {
 }
 
 func (l LustreDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
-	// fid, err := Path2Fid(filepath)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
 	return os.Stat(path.Join(l.mountPath, filePath))
 }
 
@@ -57,9 +54,9 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 	outchan := make(chan []string)
 
 	cmdName := "lfs"
-	cmdArgs := []string{"find", path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "!", "-type", "d"}
+	cmdArgs := []string{path.Join("find", l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "!", "-type", "d"}
 	if !listFiles {
-		cmdArgs = []string{"find", path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "-type", "d"}
+		cmdArgs = []string{path.Join("find", l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "-type", "d"}
 	}
 
 	cmd := exec.Command(cmdName, cmdArgs...)
@@ -73,7 +70,13 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		defer close(outchan)
 		if(!listFiles){
 			for scanner.Scan() {
-				outchan <- []string{scanner.Text()}
+				folder := scanner.Text()
+				rel, err := filepath.Rel(l.mountPath, folder)
+				if err != nil {
+					log.Printf("Error resolving folder %s: %v", folder, err)
+					continue
+				}
+				outchan <- []string{rel}
 			}
 		} else {
 			var filesBuf []string
@@ -82,7 +85,15 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 					outchan <- filesBuf
 					filesBuf = nil
 				}
-				filesBuf = append(filesBuf, scanner.Text())
+
+				file := scanner.Text()
+				rel, err := filepath.Rel(l.mountPath, file)
+				if err != nil {
+					log.Printf("Error resolving file %s: %v", file, err)
+					continue
+				}
+
+				filesBuf = append(filesBuf, rel)
 			}
 			if len(filesBuf) > 0 {
 				outchan <- filesBuf
@@ -95,5 +106,5 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		return nil, err
 	}
 
-	return outchan, nilnil
+	return outchan, nil
 }

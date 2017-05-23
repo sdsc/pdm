@@ -54,6 +54,8 @@ var debug = Debug("worker")
 
 var data_backends = make(map[string]storage_backend)
 
+var pubChan = make(chan message)
+
 type message struct {
 	Body       []byte
 	RoutingKey string
@@ -339,6 +341,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				// TODO: setstripe
 			}
 
+			debug("Started copying %s %d", filepath, worker)
 			src, err := fromDataStore.Open(filepath)
 			if err != nil {
 				log.Printf("Error opening src file %s: %s", filepath, err)
@@ -424,6 +427,8 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	for dir := range(dirsChan) {
 		debug("Found folder %s", dir)
+		msg := message{[]byte(`{"action":"copy", "item_path":["`+dir[0]+`"]}`), "dir.home.home2"}
+		pubChan <- msg
 	}
 	
 	filesChan, err := fromDataStore.ListDir(dirPath, true)
@@ -432,8 +437,18 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		return
 	}
 
-	for file := range(filesChan) {
-		debug("Found file %s", file)
+	for files := range(filesChan) {
+		debug("Found file %s", files)
+		filesStr, err := json.Marshal(files)
+		if(err != nil){
+			log.Print("Error marshaling files: ", err)
+			continue
+		}
+		resMsg := []byte(`{"action":"copy", "item_path":`)
+		resMsg = append(resMsg, filesStr...)
+		resMsg = append(resMsg, byte('}'))
+		msg := message{resMsg, "file.home.home2"}
+		pubChan <- msg
 	}
 
 }
@@ -473,7 +488,7 @@ func main() {
 
 
 		go func() {
-			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), read(os.Stdin))
+			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), pubChan)
 			done()
 		}()
 
