@@ -28,6 +28,8 @@ type storage_backend interface {
 	Lchown(filePath string, uid, gid int) error
 	Chmod(filePath string, perm os.FileMode) error
 	Mkdir(dirPath string, perm os.FileMode) error
+	Chtimes(dirPath string, atime time.Time, mtime time.Time) error
+	ListDir(dirPath string, listFiles bool) (chan []string, error)
 }
 
 func readWorkerConfig() {
@@ -43,6 +45,8 @@ func readWorkerConfig() {
 		panic(fmt.Errorf("Fatal error config file: %s \n", err))
 	}
 }
+
+const FILE_CHUNKS = 1000
 
 const exchange = "tasks"
 
@@ -309,10 +313,19 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		case mode.IsRegular():
 			//TODO: check stripes
 
+		    sourceMtime := sourceFileMeta.ModTime()
+		    sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
+		    sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
+		    // sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
+
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
+
+			    destMtime := destFileMeta.ModTime()
+
 				if sourceFileMeta.Size() == destFileMeta.Size() &&
 					sourceFileMeta.ModTime() == destFileMeta.ModTime() &&
-					sourceFileMeta.Mode() == destFileMeta.Mode() {
+					sourceFileMeta.Mode() == destFileMeta.Mode() &&
+					sourceMtime == destMtime {
 					debug("File ", filepath, " hasn't been changed")
 					return
 				}
@@ -344,17 +357,9 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
 			toDataStore.Chmod(filepath, sourceFileMeta.Mode())
+			toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
 
 			debug("Done copying %s: %d bytes", filepath, copiedData)
-
-			//{"action":"copy", "item_path":["/filelock.py"]} 
-			// {"action":"copy", "item_path":["/noc-x86_64-Debian-8.ova"]}
-
-
-            // copied_data = self.bcopy(src, dst, blksize)
-            // os.chmod(dst, srcstat.st_mode)
-            // os.utime(dst, (srcstat.st_atime, srcstat.st_mtime))
-
 		case mode.IsDir():
 			// shouldn't happen
 		case mode&os.ModeSymlink != 0:
@@ -367,36 +372,70 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
 	debug("Processing folder!")
-	dirPath := taskStruct.ItemPath[0]		
-	sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
+	dirPath := taskStruct.ItemPath[0]
+
+	if(dirPath != "/"){
+		sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
+		if err != nil {
+			log.Print("Error reading folder metadata or source folder not exists: ", err)
+			return
+		}
+
+		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
+			debug("%v",destDirMeta)
+
+			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
+			sourceDirUid := int(sourceDirStat.Uid)
+			sourceDirGid := int(sourceDirStat.Uid)
+
+			destDirStat := destDirMeta.Sys().(*syscall.Stat_t)
+			destDirUid := int(destDirStat.Uid)
+			destDirGid := int(destDirStat.Uid)
+
+			if(destDirMeta.Mode() != sourceDirMeta.Mode()) {
+				debug("Set dir chmod")
+				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
+			}
+
+			if(sourceDirUid != destDirUid || sourceDirGid != destDirGid) {
+				toDataStore.Lchown(dirPath, sourceDirUid, sourceDirGid)
+				debug("Set dir chown")
+			} 
+
+		} else {
+			level := len(strings.Split(dirPath, "/"))
+			if(level > 1) {
+				toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
+				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
+				toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
+			}
+		}
+	    // slayout = lustreapi.getstripe(sourcedir)
+	    // dlayout = lustreapi.getstripe(destdir)
+	    // if slayout.isstriped() != dlayout.isstriped() or slayout.stripecount != dlayout.stripecount:
+	    //     lustreapi.setstripe(destdir, stripecount=slayout.stripecount)
+	}
+
+	dirsChan, err := fromDataStore.ListDir(dirPath, false)
 	if err != nil {
-		log.Print("Error reading folder metadata or source folder not exists: ", err)
+		log.Print("Error listing folder: ", err)
 		return
 	}
 
-	debug("Processing folder! 1")
-	if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-		debug("%v",destDirMeta)
-	} else {
-		level := len(strings.Split(dirPath, "/"))
-		if(level > 1) {
-			toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
-		}
+	for dir := range(dirsChan) {
+		debug("Found folder %s", dir)
 	}
-	debug("Processing folder! 2")
+	
+	filesChan, err := fromDataStore.ListDir(dirPath, true)
+	if err != nil {
+		log.Print("Error listing folder: ", err)
+		return
+	}
 
-	//TODO check if this is needed!
-	toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
-	toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
-    // if(sstat.st_mode != dstat.st_mode):
-    //     os.chmod(destdir, sstat.st_mode)
-    // if((sstat.st_uid != dstat.st_uid) or (sstat.st_gid != dstat.st_gid)):
-    //     os.chown(destdir, sstat.st_uid, sstat.st_gid)
-    
-    // slayout = lustreapi.getstripe(sourcedir)
-    // dlayout = lustreapi.getstripe(destdir)
-    // if slayout.isstriped() != dlayout.isstriped() or slayout.stripecount != dlayout.stripecount:
-    //     lustreapi.setstripe(destdir, stripecount=slayout.stripecount)
+	for file := range(filesChan) {
+		debug("Found file %s", file)
+	}
+
 }
 
 var (

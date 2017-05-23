@@ -2,7 +2,10 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"io"
+	"time"
+	"bufio"
 	"path"
 )
 
@@ -38,4 +41,53 @@ func (l PosixDatastore) Chmod(filePath string, perm os.FileMode) error {
 
 func (l PosixDatastore) Mkdir(dirPath string, perm os.FileMode) error {
 	return os.Mkdir(path.Join(l.mountPath, dirPath), perm)
+}
+
+func (l PosixDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Time) error {
+	return os.Chtimes(path.Join(l.mountPath, dirPath), atime, mtime)
+}
+
+func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, error) {
+	outchan := make(chan []string)
+
+	cmdName := "find"
+	cmdArgs := []string{path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "!", "-type", "d"}
+	if !listFiles {
+		cmdArgs = []string{path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "-type", "d"}
+	}
+
+	cmd := exec.Command(cmdName, cmdArgs...)
+	cmdReader, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	scanner := bufio.NewScanner(cmdReader)
+	go func() {
+		defer close(outchan)
+		if(!listFiles){
+			for scanner.Scan() {
+				outchan <- []string{scanner.Text()}
+			}
+		} else {
+			var filesBuf []string
+			for scanner.Scan() {
+				if len(filesBuf) == FILE_CHUNKS {
+					outchan <- filesBuf
+					filesBuf = nil
+				}
+				filesBuf = append(filesBuf, scanner.Text())
+			}
+			if len(filesBuf) > 0 {
+				outchan <- filesBuf
+			}
+		}
+	}()
+
+	err = cmd.Start()
+	if err != nil {
+		return nil, err
+	}
+
+	return outchan, nil
 }
