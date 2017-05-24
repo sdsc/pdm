@@ -164,7 +164,6 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 			case msg, running = <-reading:
 				// all messages consumed
 				if !running {
-					debug("Done!")
 					if(cancel != nil) {
 						cancel()
 					}
@@ -332,7 +331,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					sourceFileMeta.ModTime() == destFileMeta.ModTime() &&
 					sourceFileMeta.Mode() == destFileMeta.Mode() &&
 					sourceMtime == destMtime {
-					debug("File ", filepath, " hasn't been changed")
+					debug("File %s hasn't been changed", filepath)
 					return
 				}
 				debug("Removing file %s",filepath)
@@ -378,8 +377,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 }
 
 func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
-	debug("Processing folder!")
 	dirPath := taskStruct.ItemPath[0]
+	debug("Processing folder %s",dirPath)
 
 	if(dirPath != "/"){
 		sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
@@ -389,7 +388,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-			debug("%v",destDirMeta)
+			//debug("%#v",destDirMeta)
 
 			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
 			sourceDirUid := int(sourceDirStat.Uid)
@@ -512,7 +511,6 @@ func main() {
 		}
 
 		pub_chan := make(chan message)
-		//defer close(pub_chan)
 
 		go func() {
 			publish(redial(ctx, rabbitmqServer), pub_chan, done)
