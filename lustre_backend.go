@@ -13,9 +13,14 @@ import (
 )
 
 type LustreDatastore struct {
+	id string
 	mountPath   string
 	shouldMount bool
 	canWrite    bool
+}
+
+func (l LustreDatastore) GetId() string {
+	return l.id
 }
 
 func (l LustreDatastore) GetMetadata(filePath string) (os.FileInfo, error) {

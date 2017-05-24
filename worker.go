@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +20,7 @@ import (
 )
 
 type storage_backend interface {
+	GetId() string
 	GetMetadata(filepath string) (os.FileInfo, error)
 	Remove(filePath string) error
 	Open(filePath string) (io.Reader, error)
@@ -250,18 +250,6 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 	}
 }
 
-func read(r io.Reader) <-chan message {
-	ret_chan := make(chan message)
-	go func() {
-		defer close(ret_chan)
-		scan := bufio.NewScanner(r)
-		for scan.Scan() {
-			var msg = message{scan.Bytes(), "file.home.home2"}
-			ret_chan <- msg
-		}
-	}()
-	return ret_chan
-}
 
 func processFilesStream() chan<- message {
 	msgs := make(chan message)
@@ -430,7 +418,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	for dir := range(dirsChan) {
 		debug("Found folder %s", dir)
-		msg := message{[]byte(`{"action":"copy", "item_path":["`+dir[0]+`"]}`), "dir.home.home2"}
+		msg := message{[]byte(`{"action":"copy", "item_path":["`+dir[0]+`"]}`), "dir."+fromDataStore.GetId()+"."+toDataStore.GetId()}
 		pubChan <- msg
 	}
 	
@@ -450,7 +438,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		resMsg := []byte(`{"action":"copy", "item_path":`)
 		resMsg = append(resMsg, filesStr...)
 		resMsg = append(resMsg, byte('}'))
-		msg := message{resMsg, "file.home.home2"}
+		msg := message{resMsg, "file."+fromDataStore.GetId()+"."+toDataStore.GetId()}
 		pubChan <- msg
 	}
 
@@ -464,6 +452,8 @@ var (
 	copy        = app.Command("copy", "Copy a folder or a file")
 	rabbitmqServerParam = copy.Flag("rabbitmq", "RabbitMQ connect string.").String()
 	isFileParam = copy.Flag("file", "Copy a file.").Bool()
+	sourceParam    = copy.Arg("source", "The source mount").Required().String()
+	targetParam    = copy.Arg("target", "The target mount").Required().String()
 	pathParam    = copy.Arg("path", "The path to copy").Required().String()
 )
 
@@ -478,11 +468,13 @@ func main() {
 			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
 			case "lustre":
 				data_backends[k] = LustreDatastore{
+					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
 			case "posix":
 				data_backends[k] = PosixDatastore{
+					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
@@ -519,7 +511,7 @@ func main() {
 		queuePrefix := "dir"
 		if *isFileParam {queuePrefix = "file"}
 
-		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\""+*pathParam+"\"]}"), queuePrefix+".home.home2"}
+		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\""+*pathParam+"\"]}"), queuePrefix+"."+*sourceParam+"."+*targetParam}
 		pub_chan <- msg
 		close(pub_chan)
 	}

@@ -12,9 +12,14 @@ import (
 )
 
 type PosixDatastore struct {
+	id string
 	mountPath   string
 	shouldMount bool
 	canWrite    bool
+}
+
+func (l PosixDatastore) GetId() string {
+	return l.id
 }
 
 func (l PosixDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
