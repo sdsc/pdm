@@ -119,7 +119,7 @@ func redial(ctx context.Context, url string) chan chan session {
 	return sessions
 }
 
-func publish(sessions chan chan session, messages <-chan message) {
+func publish(sessions chan chan session, messages <-chan message, cancel context.CancelFunc) {
 	var (
 		running bool
 		reading = messages
@@ -164,6 +164,10 @@ func publish(sessions chan chan session, messages <-chan message) {
 			case msg, running = <-reading:
 				// all messages consumed
 				if !running {
+					debug("Done!")
+					if(cancel != nil) {
+						cancel()
+					}
 					return
 				}
 				// work on pending delivery until ack'd
@@ -488,7 +492,7 @@ func main() {
 
 
 		go func() {
-			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), pubChan)
+			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), pubChan, nil)
 			done()
 		}()
 
@@ -508,10 +512,10 @@ func main() {
 		}
 
 		pub_chan := make(chan message)
-		defer close(pub_chan)
+		//defer close(pub_chan)
 
 		go func() {
-			publish(redial(ctx, rabbitmqServer), pub_chan)
+			publish(redial(ctx, rabbitmqServer), pub_chan, done)
 		}()
 
 		queuePrefix := "dir"
@@ -519,9 +523,7 @@ func main() {
 
 		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\""+*pathParam+"\"]}"), queuePrefix+".home.home2"}
 		pub_chan <- msg
-
-		time.Sleep(1000) // TODO: do something better
-		done()
+		close(pub_chan)
 	}
 
 	<-ctx.Done()
