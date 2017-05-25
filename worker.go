@@ -103,6 +103,11 @@ func redial(ctx context.Context, url string) chan chan session {
 				log.Fatalf("cannot create channel: %v", err)
 			}
 
+			err = ch.Qos(36, 0, true)
+			if err != nil {
+				log.Fatalf("cannot set channel QoS: %v", err)
+			}
+
 			if err := ch.ExchangeDeclare(exchange, "topic", false, true, false, false, nil); err != nil {
 				log.Fatalf("cannot declare exchange: %v", err)
 			}
@@ -190,7 +195,7 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 					if k2 != k {
 						routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
 
-						queueFile, err := sub.QueueDeclare("", false, true, true, false, nil)
+						queueFile, err := sub.QueueDeclare(routingKeyFile, false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 							return
@@ -207,7 +212,7 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 							return
 						}
 
-						queueDir, err := sub.QueueDeclare("", false, true, true, false, nil)
+						queueDir, err := sub.QueueDeclare(routingKeyDir, false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 							return
@@ -308,7 +313,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 		    sourceMtime := sourceFileMeta.ModTime()
 		    sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-		    sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
+		    sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
 		    // sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
@@ -376,7 +381,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-			//debug("%#v",destDirMeta)
+			debug("Dest dir exists: %#v",destDirMeta)
 
 			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
 			sourceDirUid := int(sourceDirStat.Uid)
@@ -397,12 +402,12 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			} 
 
 		} else {
-			level := len(strings.Split(dirPath, "/"))
-			if(level > 1) {
-				toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
-				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
-				toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
-			}
+			//level := len(strings.Split(dirPath, "/"))
+			toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
+			toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
+			toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
+
+
 		}
 	    // slayout = lustreapi.getstripe(sourcedir)
 	    // dlayout = lustreapi.getstripe(destdir)

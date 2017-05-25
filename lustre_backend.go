@@ -27,6 +27,11 @@ func (l LustreDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
 	return os.Stat(path.Join(l.mountPath, filePath))
 }
 
+//func (l LustreDatastore) GetSpecMetadata(filePath string) (map[string]interface{}, error) {
+//	retMeta := make(map[string]interface{})
+//	return
+//}
+
 func (l LustreDatastore) Remove(filePath string) error {
 	return os.Remove(path.Join(l.mountPath, filePath))
 }
@@ -59,9 +64,9 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 	outchan := make(chan []string)
 
 	cmdName := "lfs"
-	cmdArgs := []string{path.Join("find", l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "!", "-type", "d"}
+	cmdArgs := []string{"find", path.Join(l.mountPath, dirPath), "-maxdepth", "1", "!", "-type", "d"}
 	if !listFiles {
-		cmdArgs = []string{path.Join("find", l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "-type", "d"}
+		cmdArgs = []string{"find", path.Join(l.mountPath, dirPath), "-maxdepth", "1", "-type", "d"}
 	}
 
 	cmd := exec.Command(cmdName, cmdArgs...)
@@ -81,7 +86,9 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 					log.Printf("Error resolving folder %s: %v", folder, err)
 					continue
 				}
-				outchan <- []string{rel}
+                if(rel != "." && rel != dirPath) {
+					outchan <- []string{rel}
+                }
 			}
 		} else {
 			var filesBuf []string
