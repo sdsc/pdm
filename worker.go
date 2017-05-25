@@ -321,7 +321,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			    destMtime := destFileMeta.ModTime()
 
 				if sourceFileMeta.Size() == destFileMeta.Size() &&
-					sourceFileMeta.ModTime() == destFileMeta.ModTime() &&
 					sourceFileMeta.Mode() == destFileMeta.Mode() &&
 					sourceMtime == destMtime {
 					debug("File %s hasn't been changed", filepath)
@@ -337,7 +336,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				// TODO: setstripe
 			}
 
-			debug("Started copying %s %d", filepath, worker)
+			//debug("Started copying %s %d", filepath, worker)
 			src, err := fromDataStore.Open(filepath)
 			if err != nil {
 				log.Printf("Error opening src file %s: %s", filepath, err)
@@ -348,7 +347,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				log.Printf("Error opening dst file %s: %s", filepath, err)
 				continue
 			}
-			copiedData, err := bufioprop.Copy(dest, src, 1048559)
+			_, err = bufioprop.Copy(dest, src, 1048559)
 			if err != nil {
 				log.Printf("Error copying file %s: %s", filepath, err)
 				continue
@@ -358,7 +357,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			toDataStore.Chmod(filepath, sourceFileMeta.Mode())
 			toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
 
-			debug("Done copying %s: %d bytes", filepath, copiedData)
+			//debug("Done copying %s: %d bytes", filepath, copiedData)
 		case mode.IsDir():
 			// shouldn't happen
 		case mode&os.ModeSymlink != 0:
@@ -434,7 +433,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	}
 
 	for files := range(filesChan) {
-		debug("Found file %s", files)
+		//debug("Found file %s", files)
 		filesStr, err := json.Marshal(files)
 		if(err != nil){
 			log.Print("Error marshaling files: ", err)
