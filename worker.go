@@ -206,7 +206,7 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 							return
 						}
 
-						deliveriesFile, err := sub.Consume(queueFile.Name, "", false, true, false, false, nil)
+						deliveriesFile, err := sub.Consume(queueFile.Name, "", false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from: %q, %v", queueFile, err)
 							return
@@ -223,7 +223,7 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 							return
 						}
 
-						deliveriesDir, err := sub.Consume(queueDir.Name, "", false, true, false, false, nil)
+						deliveriesDir, err := sub.Consume(queueDir.Name, "", false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from: %q, %v", queueDir, err)
 							return
