@@ -1,19 +1,19 @@
 package main
 
 import (
+	"bufio"
+	"io"
 	"os"
 	"os/exec"
-	"io"
 	"time"
-	"bufio"
 	//"github.com/intel-hpdd/go-lustre/llapi"
-	"path"
 	"log"
+	"path"
 	"path/filepath"
 )
 
 type LustreDatastore struct {
-	id string
+	id          string
 	mountPath   string
 	shouldMount bool
 	canWrite    bool
@@ -78,7 +78,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 	scanner := bufio.NewScanner(cmdReader)
 	go func() {
 		defer close(outchan)
-		if(!listFiles){
+		if !listFiles {
 			for scanner.Scan() {
 				folder := scanner.Text()
 				rel, err := filepath.Rel(l.mountPath, folder)
@@ -86,9 +86,9 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 					log.Printf("Error resolving folder %s: %v", folder, err)
 					continue
 				}
-                if(rel != "." && rel != dirPath) {
+				if rel != "." && rel != dirPath {
 					outchan <- []string{rel}
-                }
+				}
 			}
 		} else {
 			var filesBuf []string

@@ -1,18 +1,18 @@
 package main
 
 import (
+	"bufio"
+	"io"
+	"log"
 	"os"
 	"os/exec"
-	"io"
-	"time"
-	"bufio"
 	"path"
-	"log"
 	"path/filepath"
+	"time"
 )
 
 type PosixDatastore struct {
-	id string
+	id          string
 	mountPath   string
 	shouldMount bool
 	canWrite    bool
@@ -72,7 +72,7 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 	scanner := bufio.NewScanner(cmdReader)
 	go func() {
 		defer close(outchan)
-		if(!listFiles){
+		if !listFiles {
 			for scanner.Scan() {
 				folder := scanner.Text()
 				rel, err := filepath.Rel(l.mountPath, folder)

@@ -3,20 +3,27 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	. "github.com/tj/go-debug"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
-	"log"
-	. "github.com/tj/go-debug"
-	"time"
 	"syscall"
+	"time"
+	"sync/atomic"
+	"encoding/gob"
+	"bytes"
 
+	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
-	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"gopkg.in/alecthomas/kingpin.v2"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"net/http"
 )
 
 type storage_backend interface {
@@ -30,6 +37,11 @@ type storage_backend interface {
 	Mkdir(dirPath string, perm os.FileMode) error
 	Chtimes(dirPath string, atime time.Time, mtime time.Time) error
 	ListDir(dirPath string, listFiles bool) (chan []string, error)
+}
+
+type monitoring_backend interface {
+	UpdateFiles(skipped int, processed int, bytes int) error
+	UpdateFolders(processed int) error
 }
 
 func readWorkerConfig() {
@@ -46,9 +58,20 @@ func readWorkerConfig() {
 	}
 }
 
+// These are variables used by workers to keep the statistics and periodically send 
+// these via rabbitmq to the aggregator
+var (
+	FilesCopiedCount uint64 = 0
+	FilesSkippedCount uint64 = 0
+	BytesCount uint64 = 0
+	FoldersCopiedCount uint64 = 0
+)
+
 const FILE_CHUNKS = 1000
 
 const exchange = "tasks"
+
+const prometheusTopic = "prometheus"
 
 var debug = Debug("worker")
 
@@ -156,7 +179,11 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 				reading = messages
 
 			case msg = <-pending:
-				err := pub.Publish(exchange, msg.RoutingKey, false, false, amqp.Publishing{
+				curExchange := exchange
+				if(msg.RoutingKey == prometheusTopic) {
+					curExchange = "amq.topic"
+				}
+				err := pub.Publish(curExchange, msg.RoutingKey, false, false, amqp.Publishing{
 					Body: msg.Body,
 				})
 				// Retry failed delivery on the next session
@@ -169,7 +196,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 			case msg, running = <-reading:
 				// all messages consumed
 				if !running {
-					if(cancel != nil) {
+					if cancel != nil {
 						cancel()
 					}
 					return
@@ -255,7 +282,6 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 	}
 }
 
-
 func processFilesStream() chan<- message {
 	msgs := make(chan message)
 	for i := 0; i <= viper.GetInt("file_workers"); i++ {
@@ -311,22 +337,23 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		case mode.IsRegular():
 			//TODO: check stripes
 
-		    sourceMtime := sourceFileMeta.ModTime()
-		    sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-		    sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
-		    // sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
+			sourceMtime := sourceFileMeta.ModTime()
+			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
+			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
+			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
 
-			    destMtime := destFileMeta.ModTime()
+				destMtime := destFileMeta.ModTime()
 
 				if sourceFileMeta.Size() == destFileMeta.Size() &&
 					sourceFileMeta.Mode() == destFileMeta.Mode() &&
 					sourceMtime == destMtime {
 					debug("File %s hasn't been changed", filepath)
+					atomic.AddUint64(&FilesSkippedCount, 1)
 					return
 				}
-				debug("Removing file %s",filepath)
+				debug("Removing file %s", filepath)
 				err = toDataStore.Remove(filepath)
 				if err != nil {
 					log.Print("Error removing file %s: %s", filepath, err)
@@ -335,6 +362,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 				// TODO: setstripe
 			}
+
+			defer atomic.AddUint64(&FilesCopiedCount, 1)
 
 			//debug("Started copying %s %d", filepath, worker)
 			src, err := fromDataStore.Open(filepath)
@@ -347,11 +376,12 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				log.Printf("Error opening dst file %s: %s", filepath, err)
 				continue
 			}
-			_, err = bufioprop.Copy(dest, src, 1048559)
+			bytesCopied, err := bufioprop.Copy(dest, src, 1048559)
 			if err != nil {
 				log.Printf("Error copying file %s: %s", filepath, err)
 				continue
 			}
+			atomic.AddUint64(&BytesCount, uint64(bytesCopied))
 
 			toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
 			toDataStore.Chmod(filepath, sourceFileMeta.Mode())
@@ -370,9 +400,11 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
 	dirPath := taskStruct.ItemPath[0]
-	debug("Processing folder %s",dirPath)
+	debug("Processing folder %s", dirPath)
 
-	if(dirPath != "/"){
+	defer atomic.AddUint64(&FoldersCopiedCount, 1)
+
+	if dirPath != "/" {
 		sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
 		if err != nil {
 			log.Print("Error reading folder metadata or source folder not exists: ", err)
@@ -380,7 +412,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-			debug("Dest dir exists: %#v",destDirMeta)
+			debug("Dest dir exists: %#v", destDirMeta)
 
 			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
 			sourceDirUid := int(sourceDirStat.Uid)
@@ -390,28 +422,21 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			destDirUid := int(destDirStat.Uid)
 			destDirGid := int(destDirStat.Uid)
 
-			if(destDirMeta.Mode() != sourceDirMeta.Mode()) {
+			if destDirMeta.Mode() != sourceDirMeta.Mode() {
 				debug("Set dir chmod")
 				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
 			}
 
-			if(sourceDirUid != destDirUid || sourceDirGid != destDirGid) {
+			if sourceDirUid != destDirUid || sourceDirGid != destDirGid {
 				toDataStore.Lchown(dirPath, sourceDirUid, sourceDirGid)
 				debug("Set dir chown")
-			} 
+			}
 
 		} else {
-			//level := len(strings.Split(dirPath, "/"))
 			toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
 			toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
 			toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
-
-
 		}
-	    // slayout = lustreapi.getstripe(sourcedir)
-	    // dlayout = lustreapi.getstripe(destdir)
-	    // if slayout.isstriped() != dlayout.isstriped() or slayout.stripecount != dlayout.stripecount:
-	    //     lustreapi.setstripe(destdir, stripecount=slayout.stripecount)
 	}
 
 	dirsChan, err := fromDataStore.ListDir(dirPath, false)
@@ -420,45 +445,47 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		return
 	}
 
-	for dir := range(dirsChan) {
+	for dir := range dirsChan {
 		debug("Found folder %s", dir)
-		msg := message{[]byte(`{"action":"copy", "item_path":["`+dir[0]+`"]}`), "dir."+fromDataStore.GetId()+"."+toDataStore.GetId()}
+		msg := message{[]byte(`{"action":"copy", "item_path":["` + dir[0] + `"]}`), "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 		pubChan <- msg
 	}
-	
+
 	filesChan, err := fromDataStore.ListDir(dirPath, true)
 	if err != nil {
 		log.Print("Error listing folder: ", err)
 		return
 	}
 
-	for files := range(filesChan) {
+	for files := range filesChan {
 		//debug("Found file %s", files)
 		filesStr, err := json.Marshal(files)
-		if(err != nil){
+		if err != nil {
 			log.Print("Error marshaling files: ", err)
 			continue
 		}
 		resMsg := []byte(`{"action":"copy", "item_path":`)
 		resMsg = append(resMsg, filesStr...)
 		resMsg = append(resMsg, byte('}'))
-		msg := message{resMsg, "file."+fromDataStore.GetId()+"."+toDataStore.GetId()}
+		msg := message{resMsg, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 		pubChan <- msg
 	}
 
 }
 
 var (
-	app      = kingpin.New("pdm", "Parallel data mover.")
+	app = kingpin.New("pdm", "Parallel data mover.")
 
-	worker     = app.Command("worker", "Run a worker")
+	worker = app.Command("worker", "Run a worker")
 
-	copy        = app.Command("copy", "Copy a folder or a file")
+	copy                = app.Command("copy", "Copy a folder or a file")
 	rabbitmqServerParam = copy.Flag("rabbitmq", "RabbitMQ connect string.").String()
-	isFileParam = copy.Flag("file", "Copy a file.").Bool()
-	sourceParam    = copy.Arg("source", "The source mount").Required().String()
-	targetParam    = copy.Arg("target", "The target mount").Required().String()
-	pathParam    = copy.Arg("path", "The path to copy").Required().String()
+	isFileParam         = copy.Flag("file", "Copy a file.").Bool()
+	sourceParam         = copy.Arg("source", "The source mount").Required().String()
+	targetParam         = copy.Arg("target", "The target mount").Required().String()
+	pathParam           = copy.Arg("path", "The path to copy").Required().String()
+
+	monitor = app.Command("monitor", "Start monitoring daemon")
 )
 
 func main() {
@@ -485,7 +512,6 @@ func main() {
 			}
 		}
 
-
 		go func() {
 			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), pubChan, nil)
 			done()
@@ -495,14 +521,45 @@ func main() {
 			subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(), processFoldersStream())
 			done()
 		}()
-		
+
+		go func() {
+		    for range time.NewTicker(time.Duration(viper.GetInt("monitor_interval")) * time.Second).C {
+				curFilesCopiedCount := atomic.SwapUint64(&FilesCopiedCount, 0)
+				curFilesSkippedCount := atomic.SwapUint64(&FilesSkippedCount, 0)
+				curBytesCount := atomic.SwapUint64(&BytesCount, 0)
+				curFoldersCopiedCount := atomic.SwapUint64(&FoldersCopiedCount, 0)
+				hostname, err := os.Hostname()
+				if err != nil {
+					log.Print("Error getting hostname: ", err)
+				}
+				msgBody := monMessage{
+					"none",
+					hostname,
+					float64(curFilesCopiedCount),
+					float64(curFilesSkippedCount),
+					float64(curBytesCount),
+					float64(curFoldersCopiedCount)}
+
+			    var buf bytes.Buffer
+			    enc := gob.NewEncoder(&buf)
+			    err = enc.Encode(msgBody)
+			    if err != nil {
+					log.Print("Error encoding monitoring message: ", err)
+			        continue
+			    }
+
+				msg := message{buf.Bytes(), prometheusTopic}
+				pubChan <- msg
+			    
+			}
+		}()
 
 	case copy.FullCommand():
 		rabbitmqServer := ""
 
-		if(os.Getenv("PDM_RABBITMQ") != "") {
+		if os.Getenv("PDM_RABBITMQ") != "" {
 			rabbitmqServer = os.Getenv("PDM_RABBITMQ")
-		} else if(*rabbitmqServerParam != "") {
+		} else if *rabbitmqServerParam != "" {
 			rabbitmqServer = *rabbitmqServerParam
 		}
 
@@ -513,11 +570,29 @@ func main() {
 		}()
 
 		queuePrefix := "dir"
-		if *isFileParam {queuePrefix = "file"}
+		if *isFileParam {
+			queuePrefix = "file"
+		}
 
-		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\""+*pathParam+"\"]}"), queuePrefix+"."+*sourceParam+"."+*targetParam}
+		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"" + *pathParam + "\"]}"), queuePrefix + "." + *sourceParam + "." + *targetParam}
 		pub_chan <- msg
 		close(pub_chan)
+
+	case monitor.FullCommand():
+		readWorkerConfig()
+		prometheus.MustRegister(FilesCopiedCounter)
+		prometheus.MustRegister(FilesSkippedCounter)
+		prometheus.MustRegister(BytesCounter)
+		prometheus.MustRegister(FoldersCopiedCounter)
+
+		go func() {
+			subscribeMon(redial(ctx, viper.GetString("rabbitmq.connect_string")), processMonitorStream(), prometheusTopic)
+			done()
+		}()
+
+		http.Handle("/metrics", promhttp.Handler())
+		log.Fatal(http.ListenAndServe(":8082", nil))
+
 	}
 
 	<-ctx.Done()
