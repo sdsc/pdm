@@ -209,7 +209,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 	}
 }
 
-func subscribe(sessions chan chan session, file_messages chan<- message, folder_messages chan<- message) {
+func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, folder_messages chan<- amqp.Delivery) {
 
 	for session := range sessions {
 		sub := <-session
@@ -261,17 +261,15 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 						go func() {
 							defer wg.Done()
 							for msg := range deliveriesFile {
-								var new_msg = message{msg.Body, msg.RoutingKey}
-								file_messages <- new_msg
-								sub.Ack(msg.DeliveryTag, false)
+								file_messages <- msg
+								// sub.Ack(msg.DeliveryTag, false)
 							}
 						}()
 						go func() {
 							defer wg.Done()
 							for msg := range deliveriesDir {
-								var new_msg = message{msg.Body, msg.RoutingKey}
-								folder_messages <- new_msg
-								sub.Ack(msg.DeliveryTag, false)
+								folder_messages <- msg
+								// sub.Ack(msg.DeliveryTag, false)
 							}
 						}()
 					}
@@ -282,8 +280,8 @@ func subscribe(sessions chan chan session, file_messages chan<- message, folder_
 	}
 }
 
-func processFilesStream() chan<- message {
-	msgs := make(chan message)
+func processFilesStream() chan<- amqp.Delivery {
+	msgs := make(chan amqp.Delivery)
 	for i := 0; i <= viper.GetInt("file_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
@@ -296,14 +294,15 @@ func processFilesStream() chan<- message {
 					continue
 				}
 				processFiles(fromDataStore, toDataStore, cur_task)
+				msg.Acknowledger.Ack(msg.DeliveryTag, false)
 			}
 		}(i)
 	}
 	return msgs
 }
 
-func processFoldersStream() chan<- message {
-	msgs := make(chan message)
+func processFoldersStream() chan<- amqp.Delivery {
+	msgs := make(chan amqp.Delivery)
 	for i := 0; i <= viper.GetInt("folder_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
@@ -316,6 +315,7 @@ func processFoldersStream() chan<- message {
 					continue
 				}
 				processFolder(fromDataStore, toDataStore, cur_task)
+				msg.Acknowledger.Ack(msg.DeliveryTag, false)
 			}
 		}(i)
 	}
@@ -339,7 +339,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			sourceMtime := sourceFileMeta.ModTime()
 			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
+			sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
 			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists

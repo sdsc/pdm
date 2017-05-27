@@ -6,6 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"sync"
 	"log"
+	"github.com/streadway/amqp"
 )
 
 type monMessage struct {
@@ -40,7 +41,7 @@ var (
 		[]string{"node", "datasource"})
 )
 
-func subscribeMon(sessions chan chan session, mon_messages chan<- message, topic string) {
+func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery, topic string) {
 
 	for session := range sessions {
 		sub := <-session
@@ -69,8 +70,7 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- message, topic
 		go func() {
 			defer wg.Done()
 			for msg := range deliveriesMon {
-				var new_msg = message{msg.Body, msg.RoutingKey}
-				mon_messages <- new_msg
+				mon_messages <- msg
 				sub.Ack(msg.DeliveryTag, false)
 			}
 		}()
@@ -78,8 +78,8 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- message, topic
 	}
 }
 
-func processMonitorStream() chan<- message {
-	msgs := make(chan message)
+func processMonitorStream() chan<- amqp.Delivery {
+	msgs := make(chan amqp.Delivery)
 	go func() {
 		for msg := range msgs {
 			var curMonMessage monMessage
@@ -95,7 +95,6 @@ func processMonitorStream() chan<- message {
 			if curMonMessage.FilesCopied > 0 {
 				FilesCopiedCounter.WithLabelValues(curMonMessage.Node, curMonMessage.DataSource).Add(curMonMessage.FilesCopied)
 			}
-			FilesCopiedCounter.WithLabelValues(curMonMessage.Node, curMonMessage.DataSource).Add(1)
 			if curMonMessage.FilesSkipped > 0 {
 				FilesSkippedCounter.WithLabelValues(curMonMessage.Node, curMonMessage.DataSource).Add(curMonMessage.FilesSkipped)
 			}
