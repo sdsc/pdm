@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	. "github.com/tj/go-debug"
 	"io"
@@ -85,8 +84,8 @@ type message struct {
 }
 
 type task struct {
-	Action   string   `json:"action"`
-	ItemPath []string `json:"item_path"`
+	Action   string
+	ItemPath []string
 }
 
 type session struct {
@@ -285,15 +284,19 @@ func processFilesStream() chan<- amqp.Delivery {
 	for i := 0; i <= viper.GetInt("file_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				var cur_task task
+				var curTask task
 				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
 				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
-				err := json.Unmarshal(msg.Body, &cur_task)
+
+				buf := bytes.NewBuffer(msg.Body)
+				dec := gob.NewDecoder(buf)
+				err := dec.Decode(&curTask)
 				if err != nil {
-					log.Printf("Error parsing message: %s from %s", msg.Body, msg.RoutingKey)
+					log.Printf("Error parsing message: %s", err)
 					continue
 				}
-				processFiles(fromDataStore, toDataStore, cur_task)
+
+				processFiles(fromDataStore, toDataStore, curTask)
 				msg.Acknowledger.Ack(msg.DeliveryTag, false)
 			}
 		}(i)
@@ -306,15 +309,19 @@ func processFoldersStream() chan<- amqp.Delivery {
 	for i := 0; i <= viper.GetInt("folder_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				var cur_task task
+				var curTask task
 				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
 				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
-				err := json.Unmarshal(msg.Body, &cur_task)
+
+				buf := bytes.NewBuffer(msg.Body)
+				dec := gob.NewDecoder(buf)
+				err := dec.Decode(&curTask)
 				if err != nil {
-					log.Printf("Error parsing message: %s", msg.Body)
+					log.Printf("Error parsing message: %s", err)
 					continue
 				}
-				processFolder(fromDataStore, toDataStore, cur_task)
+
+				processFolder(fromDataStore, toDataStore, curTask)
 				msg.Acknowledger.Ack(msg.DeliveryTag, false)
 			}
 		}(i)
@@ -327,6 +334,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 		if err != nil {
 			log.Print("Error reading file metadata: ", err)
+			continue
 		}
 
 		//debug("For file %s got meta %#v", filepath, sourceFileMeta)
@@ -459,15 +467,20 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	for files := range filesChan {
 		//debug("Found file %s", files)
-		filesStr, err := json.Marshal(files)
-		if err != nil {
-			log.Print("Error marshaling files: ", err)
-			continue
-		}
-		resMsg := []byte(`{"action":"copy", "item_path":`)
-		resMsg = append(resMsg, filesStr...)
-		resMsg = append(resMsg, byte('}'))
-		msg := message{resMsg, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+
+		msgTask := task{
+			"copy",
+			files}
+
+	    var buf bytes.Buffer
+	    enc := gob.NewEncoder(&buf)
+	    err = enc.Encode(msgTask)
+	    if err != nil {
+			log.Print("Error encoding monitoring message: ", err)
+	        continue
+	    }
+
+		msg := message{buf.Bytes(), "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 		pubChan <- msg
 	}
 
