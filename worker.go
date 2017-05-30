@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	. "github.com/tj/go-debug"
 	"io"
@@ -8,11 +10,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
-	"sync/atomic"
-	"encoding/gob"
-	"bytes"
 
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
+	_ "net/http/pprof"
 )
 
 type storage_backend interface {
@@ -57,12 +58,12 @@ func readWorkerConfig() {
 	}
 }
 
-// These are variables used by workers to keep the statistics and periodically send 
+// These are variables used by workers to keep the statistics and periodically send
 // these via rabbitmq to the aggregator
 var (
-	FilesCopiedCount uint64 = 0
-	FilesSkippedCount uint64 = 0
-	BytesCount uint64 = 0
+	FilesCopiedCount   uint64 = 0
+	FilesSkippedCount  uint64 = 0
+	BytesCount         uint64 = 0
 	FoldersCopiedCount uint64 = 0
 )
 
@@ -179,7 +180,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 
 			case msg = <-pending:
 				curExchange := exchange
-				if(msg.RoutingKey == prometheusTopic) {
+				if msg.RoutingKey == prometheusTopic {
 					curExchange = "amq.topic"
 				}
 				err := pub.Publish(curExchange, msg.RoutingKey, false, false, amqp.Publishing{
@@ -347,7 +348,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			sourceMtime := sourceFileMeta.ModTime()
 			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-			sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
+			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
 			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
@@ -357,7 +358,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				if sourceFileMeta.Size() == destFileMeta.Size() &&
 					sourceFileMeta.Mode() == destFileMeta.Mode() &&
 					sourceMtime == destMtime {
-					debug("File %s hasn't been changed", filepath)
+					//debug("File %s hasn't been changed", filepath)
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
@@ -455,7 +456,20 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	for dir := range dirsChan {
 		debug("Found folder %s", dir)
-		msg := message{[]byte(`{"action":"copy", "item_path":["` + dir[0] + `"]}`), "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+
+		msgTask := task{
+			"copy",
+			dir}
+
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		err := enc.Encode(msgTask)
+		if err != nil {
+			log.Print("Error encoding dir message: ", err)
+			continue
+		}
+
+		msg := message{buf.Bytes(), "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 		pubChan <- msg
 	}
 
@@ -472,13 +486,13 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			"copy",
 			files}
 
-	    var buf bytes.Buffer
-	    enc := gob.NewEncoder(&buf)
-	    err = enc.Encode(msgTask)
-	    if err != nil {
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		err = enc.Encode(msgTask)
+		if err != nil {
 			log.Print("Error encoding monitoring message: ", err)
-	        continue
-	    }
+			continue
+		}
 
 		msg := message{buf.Bytes(), "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 		pubChan <- msg
@@ -503,6 +517,9 @@ var (
 
 func main() {
 	ctx, done := context.WithCancel(context.Background())
+	go func() {
+		http.ListenAndServe(":8080", nil)
+	}()
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case worker.FullCommand():
@@ -536,7 +553,7 @@ func main() {
 		}()
 
 		go func() {
-		    for range time.NewTicker(time.Duration(viper.GetInt("monitor_interval")) * time.Second).C {
+			for range time.NewTicker(time.Duration(viper.GetInt("monitor_interval")) * time.Second).C {
 				curFilesCopiedCount := atomic.SwapUint64(&FilesCopiedCount, 0)
 				curFilesSkippedCount := atomic.SwapUint64(&FilesSkippedCount, 0)
 				curBytesCount := atomic.SwapUint64(&BytesCount, 0)
@@ -553,17 +570,17 @@ func main() {
 					float64(curBytesCount),
 					float64(curFoldersCopiedCount)}
 
-			    var buf bytes.Buffer
-			    enc := gob.NewEncoder(&buf)
-			    err = enc.Encode(msgBody)
-			    if err != nil {
+				var buf bytes.Buffer
+				enc := gob.NewEncoder(&buf)
+				err = enc.Encode(msgBody)
+				if err != nil {
 					log.Print("Error encoding monitoring message: ", err)
-			        continue
-			    }
+					continue
+				}
 
 				msg := message{buf.Bytes(), prometheusTopic}
 				pubChan <- msg
-			    
+
 			}
 		}()
 
@@ -591,13 +608,13 @@ func main() {
 			"copy",
 			[]string{*pathParam}}
 
-	    var buf bytes.Buffer
-	    enc := gob.NewEncoder(&buf)
-	    err = enc.Encode(msgTask)
-	    if err != nil {
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		err := enc.Encode(msgTask)
+		if err != nil {
 			log.Print("Error encoding monitoring message: ", err)
-	        continue
-	    }
+			return
+		}
 
 		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceParam + "." + *targetParam}
 		pub_chan <- msg
