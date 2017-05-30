@@ -46,20 +46,26 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 	for session := range sessions {
 		sub := <-session
 
+		ch, err := sub.Channel()
+		if err != nil {
+			log.Fatalf("cannot create channel: %v", err)
+			continue
+		}
+
 		var wg sync.WaitGroup
 
-		queueMon, err := sub.QueueDeclare("", false, true, true, true, nil)
+		queueMon, err := ch.QueueDeclare("", false, true, true, true, nil)
 		if err != nil {
 			log.Printf("cannot consume from exclusive queue: %q, %v", queueMon, err)
 			return
 		}
 
-		if err := sub.QueueBind(queueMon.Name, topic, "amq.topic", false, nil); err != nil {
+		if err := ch.QueueBind(queueMon.Name, topic, "amq.topic", false, nil); err != nil {
 			log.Printf("cannot consume without a binding to exchange: %q, %v", "amq.topic", err)
 			return
 		}
 
-		deliveriesMon, err := sub.Consume(queueMon.Name, "", false, false, false, false, nil)
+		deliveriesMon, err := ch.Consume(queueMon.Name, "", false, false, false, false, nil)
 		if err != nil {
 			log.Printf("cannot consume from: %q, %v", queueMon, err)
 			return
@@ -71,7 +77,7 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 			defer wg.Done()
 			for msg := range deliveriesMon {
 				mon_messages <- msg
-				sub.Ack(msg.DeliveryTag, false)
+				ch.Ack(msg.DeliveryTag, false)
 			}
 		}()
 		wg.Wait()

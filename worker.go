@@ -69,9 +69,9 @@ var (
 
 const FILE_CHUNKS = 1000
 
-const exchange = "tasks"
-
 const prometheusTopic = "prometheus"
+
+const tasksExchange = "tasks"
 
 var debug = Debug("worker")
 
@@ -91,7 +91,6 @@ type task struct {
 
 type session struct {
 	*amqp.Connection
-	*amqp.Channel
 }
 
 func (s session) Close() error {
@@ -121,22 +120,8 @@ func redial(ctx context.Context, url string) chan chan session {
 				log.Fatalf("cannot (re)dial: %v: %q", err, url)
 			}
 
-			ch, err := conn.Channel()
-			if err != nil {
-				log.Fatalf("cannot create channel: %v", err)
-			}
-
-			err = ch.Qos(36, 0, true)
-			if err != nil {
-				log.Fatalf("cannot set channel QoS: %v", err)
-			}
-
-			if err := ch.ExchangeDeclare(exchange, "topic", false, true, false, false, nil); err != nil {
-				log.Fatalf("cannot declare exchange: %v", err)
-			}
-
 			select {
-			case sess <- session{conn, ch}:
+			case sess <- session{conn}:
 			case <-ctx.Done():
 				log.Println("shutting down new session")
 				return
@@ -158,12 +143,23 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 	for session := range sessions {
 		pub := <-session
 
+		ch, err := pub.Channel()
+		if err != nil {
+			log.Fatalf("cannot create channel: %v", err)
+			continue
+		}
+
+		if err := ch.ExchangeDeclare(tasksExchange, "topic", false, true, false, false, nil); err != nil {
+			log.Fatalf("cannot declare exchange: %v", err)
+			continue
+		}
+
 		// publisher confirms for this channel/connection
-		if err := pub.Confirm(false); err != nil {
+		if err := ch.Confirm(false); err != nil {
 			log.Printf("publisher confirms not supported")
 			close(confirm) // confirms not supported, simulate by always nacking
 		} else {
-			pub.NotifyPublish(confirm)
+			ch.NotifyPublish(confirm)
 		}
 
 		log.Printf("publishing...")
@@ -179,17 +175,17 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 				reading = messages
 
 			case msg = <-pending:
-				curExchange := exchange
+				curExchange := tasksExchange
 				if msg.RoutingKey == prometheusTopic {
 					curExchange = "amq.topic"
 				}
-				err := pub.Publish(curExchange, msg.RoutingKey, false, false, amqp.Publishing{
+				err := ch.Publish(curExchange, msg.RoutingKey, false, false, amqp.Publishing{
 					Body: msg.Body,
 				})
 				// Retry failed delivery on the next session
 				if err != nil {
 					pending <- msg
-					pub.Close()
+					ch.Close()
 					break Publish
 				}
 
@@ -214,6 +210,28 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 	for session := range sessions {
 		sub := <-session
 
+		filech, err := sub.Channel()
+		if err != nil {
+			log.Fatalf("cannot create channel: %v", err)
+			continue
+		}
+
+		err = filech.Qos(6, 0, false)
+		if err != nil {
+			log.Fatalf("cannot set channel QoS: %v", err)
+		}
+
+		dirch, err := sub.Channel()
+		if err != nil {
+			log.Fatalf("cannot create channel: %v", err)
+			continue
+		}
+
+		err = dirch.Qos(6, 0, false)
+		if err != nil {
+			log.Fatalf("cannot set channel QoS: %v", err)
+		}
+
 		var wg sync.WaitGroup
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
@@ -222,35 +240,35 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 					if k2 != k {
 						routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
 
-						queueFile, err := sub.QueueDeclare(routingKeyFile, false, false, false, false, nil)
+						queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 							return
 						}
 
-						if err := sub.QueueBind(queueFile.Name, routingKeyFile, exchange, false, nil); err != nil {
-							log.Printf("cannot consume without a binding to exchange: %q, %v", exchange, err)
+						if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
+							log.Printf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 							return
 						}
 
-						deliveriesFile, err := sub.Consume(queueFile.Name, "", false, false, false, false, nil)
+						deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from: %q, %v", queueFile, err)
 							return
 						}
 
-						queueDir, err := sub.QueueDeclare(routingKeyDir, false, false, false, false, nil)
+						queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 							return
 						}
 
-						if err := sub.QueueBind(queueDir.Name, routingKeyDir, exchange, false, nil); err != nil {
-							log.Printf("cannot consume without a binding to exchange: %q, %v", exchange, err)
+						if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
+							log.Printf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 							return
 						}
 
-						deliveriesDir, err := sub.Consume(queueDir.Name, "", false, false, false, false, nil)
+						deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
 						if err != nil {
 							log.Printf("cannot consume from: %q, %v", queueDir, err)
 							return
@@ -262,14 +280,12 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 							defer wg.Done()
 							for msg := range deliveriesFile {
 								file_messages <- msg
-								// sub.Ack(msg.DeliveryTag, false)
 							}
 						}()
 						go func() {
 							defer wg.Done()
 							for msg := range deliveriesDir {
 								folder_messages <- msg
-								// sub.Ack(msg.DeliveryTag, false)
 							}
 						}()
 					}
@@ -348,7 +364,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			sourceMtime := sourceFileMeta.ModTime()
 			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
+			//sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
+			sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
 			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
