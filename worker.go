@@ -359,7 +359,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					sourceMtime == destMtime {
 					debug("File %s hasn't been changed", filepath)
 					atomic.AddUint64(&FilesSkippedCount, 1)
-					return
+					continue
 				}
 				debug("Removing file %s", filepath)
 				err = toDataStore.Remove(filepath)
