@@ -587,7 +587,19 @@ func main() {
 			queuePrefix = "file"
 		}
 
-		var msg = message{[]byte("{\"action\":\"copy\", \"item_path\":[\"" + *pathParam + "\"]}"), queuePrefix + "." + *sourceParam + "." + *targetParam}
+		msgTask := task{
+			"copy",
+			[]string{*pathParam}}
+
+	    var buf bytes.Buffer
+	    enc := gob.NewEncoder(&buf)
+	    err = enc.Encode(msgTask)
+	    if err != nil {
+			log.Print("Error encoding monitoring message: ", err)
+	        continue
+	    }
+
+		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceParam + "." + *targetParam}
 		pub_chan <- msg
 		close(pub_chan)
 
