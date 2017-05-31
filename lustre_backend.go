@@ -36,11 +36,11 @@ func (l LustreDatastore) Remove(filePath string) error {
 	return os.Remove(path.Join(l.mountPath, filePath))
 }
 
-func (l LustreDatastore) Open(filePath string) (io.Reader, error) {
+func (l LustreDatastore) Open(filePath string) (io.ReadCloser, error) {
 	return os.Open(path.Join(l.mountPath, filePath))
 }
 
-func (l LustreDatastore) Create(filePath string) (io.Writer, error) {
+func (l LustreDatastore) Create(filePath string) (io.WriteCloser, error) {
 	return os.Create(path.Join(l.mountPath, filePath))
 }
 
@@ -76,6 +76,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 	}
 
 	scanner := bufio.NewScanner(cmdReader)
+
 	go func() {
 		defer close(outchan)
 		if !listFiles {

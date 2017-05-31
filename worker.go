@@ -30,8 +30,8 @@ type storage_backend interface {
 	GetId() string
 	GetMetadata(filepath string) (os.FileInfo, error)
 	Remove(filePath string) error
-	Open(filePath string) (io.Reader, error)
-	Create(filePath string) (io.Writer, error)
+	Open(filePath string) (io.ReadCloser, error)
+	Create(filePath string) (io.WriteCloser, error)
 	Lchown(filePath string, uid, gid int) error
 	Chmod(filePath string, perm os.FileMode) error
 	Mkdir(dirPath string, perm os.FileMode) error
@@ -77,7 +77,7 @@ var debug = Debug("worker")
 
 var data_backends = make(map[string]storage_backend)
 
-var pubChan = make(chan message)
+var pubChan = make(chan message, 512)
 
 type message struct {
 	Body       []byte
@@ -216,7 +216,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 			continue
 		}
 
-		err = filech.Qos(6, 0, false)
+		err = filech.Qos(36, 0, false)
 		if err != nil {
 			log.Fatalf("cannot set channel QoS: %v", err)
 		}
@@ -227,7 +227,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 			continue
 		}
 
-		err = dirch.Qos(6, 0, false)
+		err = dirch.Qos(36, 0, false)
 		if err != nil {
 			log.Fatalf("cannot set channel QoS: %v", err)
 		}
@@ -364,8 +364,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			sourceMtime := sourceFileMeta.ModTime()
 			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-			//sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
-			sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
+			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
 			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
@@ -379,10 +378,10 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
-				debug("Removing file %s", filepath)
+				log.Printf("Removing file %s", filepath)
 				err = toDataStore.Remove(filepath)
 				if err != nil {
-					log.Print("Error removing file %s: %s", filepath, err)
+					log.Print("Error removing file ", filepath, ": ", err)
 					continue
 				}
 
@@ -394,19 +393,23 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			//debug("Started copying %s %d", filepath, worker)
 			src, err := fromDataStore.Open(filepath)
 			if err != nil {
-				log.Printf("Error opening src file %s: %s", filepath, err)
+				log.Printf("Error opening src file ", filepath, ": ", err)
 				continue
 			}
 			dest, err := toDataStore.Create(filepath)
 			if err != nil {
-				log.Printf("Error opening dst file %s: %s", filepath, err)
+				log.Printf("Error opening dst file ", filepath, ": ", err)
 				continue
 			}
 			bytesCopied, err := bufioprop.Copy(dest, src, 1048559)
 			if err != nil {
-				log.Printf("Error copying file %s: %s", filepath, err)
+				log.Printf("Error copying file ", filepath, ": ", err)
 				continue
 			}
+
+			src.Close()
+			dest.Close()
+
 			atomic.AddUint64(&BytesCount, uint64(bytesCopied))
 
 			toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
