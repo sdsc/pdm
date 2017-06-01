@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"github.com/prometheus/client_golang/prometheus"
 	"sync"
-	"log"
 	"github.com/streadway/amqp"
 )
 

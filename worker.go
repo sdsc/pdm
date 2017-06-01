@@ -6,7 +6,6 @@ import (
 	"fmt"
 	. "github.com/tj/go-debug"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"sync"
@@ -24,6 +23,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
 	_ "net/http/pprof"
+
+	"github.com/Sirupsen/logrus"
+	"gopkg.in/sohlich/elogrus.v2"
+	"gopkg.in/olivere/elastic.v5"
 )
 
 type storage_backend interface {
@@ -66,6 +69,8 @@ var (
 	BytesCount         uint64 = 0
 	FoldersCopiedCount uint64 = 0
 )
+
+var log = logrus.New()
 
 const FILE_CHUNKS = 1000
 
@@ -354,7 +359,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			continue
 		}
 
-		//debug("For file %s got meta %#v", filepath, sourceFileMeta)
+		log.Debug("For file %s got meta %#v", filepath, sourceFileMeta)
 
 		//TODO: check date
 
@@ -365,6 +370,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			sourceMtime := sourceFileMeta.ModTime()
 			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
 			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
+			//sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
 			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
@@ -374,7 +380,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				if sourceFileMeta.Size() == destFileMeta.Size() &&
 					sourceFileMeta.Mode() == destFileMeta.Mode() &&
 					sourceMtime == destMtime {
-					//debug("File %s hasn't been changed", filepath)
+					log.Debug("File %s hasn't been changed", filepath)
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
@@ -390,7 +396,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			defer atomic.AddUint64(&FilesCopiedCount, 1)
 
-			//debug("Started copying %s %d", filepath, worker)
+			log.Debug("Started copying %s %d", filepath, worker)
 			src, err := fromDataStore.Open(filepath)
 			if err != nil {
 				log.Printf("Error opening src file ", filepath, ": ", err)
@@ -416,7 +422,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			toDataStore.Chmod(filepath, sourceFileMeta.Mode())
 			toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
 
-			//debug("Done copying %s: %d bytes", filepath, copiedData)
+			log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
 		case mode.IsDir():
 			// shouldn't happen
 		case mode&os.ModeSymlink != 0:
@@ -429,7 +435,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
 	dirPath := taskStruct.ItemPath[0]
-	debug("Processing folder %s", dirPath)
+	log.Debug("Processing folder %s", dirPath)
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
 
@@ -441,7 +447,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-			debug("Dest dir exists: %#v", destDirMeta)
+			log.Debug("Dest dir exists: %#v", destDirMeta)
 
 			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
 			sourceDirUid := int(sourceDirStat.Uid)
@@ -452,13 +458,13 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			destDirGid := int(destDirStat.Uid)
 
 			if destDirMeta.Mode() != sourceDirMeta.Mode() {
-				debug("Set dir chmod")
+				log.Debug("Set dir chmod")
 				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
 			}
 
 			if sourceDirUid != destDirUid || sourceDirGid != destDirGid {
 				toDataStore.Lchown(dirPath, sourceDirUid, sourceDirGid)
-				debug("Set dir chown")
+				log.Debug("Set dir chown")
 			}
 
 		} else {
@@ -475,7 +481,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	}
 
 	for dir := range dirsChan {
-		debug("Found folder %s", dir)
+		log.Debug("Found folder %s", dir)
 
 		msgTask := task{
 			"copy",
@@ -500,7 +506,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	}
 
 	for files := range filesChan {
-		//debug("Found file %s", files)
+		log.Debug("Found file %s", files)
 
 		msgTask := task{
 			"copy",
@@ -518,6 +524,24 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		pubChan <- msg
 	}
 
+}
+
+func initElasticLog() {
+	client, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
+	if err != nil {
+		log.Panic(err)
+	}	
+	hook, err := elogrus.NewElasticHook(client, "localhost", logrus.DebugLevel, "pdmlog")
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Level = logrus.DebugLevel
+	log.Hooks.Add(hook)
+
+	// log.WithFields(logrus.Fields{
+	// 	"name": "joe",
+	// 	"age":  42,
+	// }).Error("Hello world!")
 }
 
 var (
@@ -544,6 +568,10 @@ func main() {
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case worker.FullCommand():
 		readWorkerConfig()
+
+		if viper.IsSet("elastic_url") {
+			initElasticLog()
+		}
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
 			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {

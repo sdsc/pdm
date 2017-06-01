@@ -1,6 +1,8 @@
 dir_workers = 5
 file_workers = 5
 
+elastic_url = "http://localhost:9200"
+
 [rabbitmq]
 connect_string = "amqp://guest:guest@localhost:5672/"
 

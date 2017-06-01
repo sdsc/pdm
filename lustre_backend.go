@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"time"
 	//"github.com/intel-hpdd/go-lustre/llapi"
-	"log"
 	"path"
 	"path/filepath"
 )
