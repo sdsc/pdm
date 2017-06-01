@@ -116,7 +116,7 @@ func redial(ctx context.Context, url string) chan chan session {
 			select {
 			case sessions <- sess:
 			case <-ctx.Done():
-				log.Println("shutting down session factory")
+				log.Debug("shutting down session factory")
 				return
 			}
 
@@ -128,7 +128,7 @@ func redial(ctx context.Context, url string) chan chan session {
 			select {
 			case sess <- session{conn}:
 			case <-ctx.Done():
-				log.Println("shutting down new session")
+				log.Debug("shutting down new session")
 				return
 			}
 		}
@@ -161,13 +161,13 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 
 		// publisher confirms for this channel/connection
 		if err := ch.Confirm(false); err != nil {
-			log.Printf("publisher confirms not supported")
+			log.Error("publisher confirms not supported")
 			close(confirm) // confirms not supported, simulate by always nacking
 		} else {
 			ch.NotifyPublish(confirm)
 		}
 
-		log.Printf("publishing...")
+		log.Debug("publishing...")
 
 	Publish:
 		for {
@@ -175,7 +175,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 			select {
 			case confirmed := <-confirm:
 				if !confirmed.Ack {
-					log.Printf("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
+					log.Debug("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
 				}
 				reading = messages
 
@@ -247,35 +247,35 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 
 						queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
 						if err != nil {
-							log.Printf("cannot consume from exclusive queue: %q, %v", queueFile, err)
+							log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 							return
 						}
 
 						if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
-							log.Printf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+							log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 							return
 						}
 
 						deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
 						if err != nil {
-							log.Printf("cannot consume from: %q, %v", queueFile, err)
+							log.Errorf("cannot consume from: %q, %v", queueFile, err)
 							return
 						}
 
 						queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
 						if err != nil {
-							log.Printf("cannot consume from exclusive queue: %q, %v", queueDir, err)
+							log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 							return
 						}
 
 						if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
-							log.Printf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+							log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 							return
 						}
 
 						deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
 						if err != nil {
-							log.Printf("cannot consume from: %q, %v", queueDir, err)
+							log.Errorf("cannot consume from: %q, %v", queueDir, err)
 							return
 						}
 
@@ -314,7 +314,7 @@ func processFilesStream() chan<- amqp.Delivery {
 				dec := gob.NewDecoder(buf)
 				err := dec.Decode(&curTask)
 				if err != nil {
-					log.Printf("Error parsing message: %s", err)
+					log.Errorf("Error parsing message: %s", err)
 					continue
 				}
 
@@ -339,7 +339,7 @@ func processFoldersStream() chan<- amqp.Delivery {
 				dec := gob.NewDecoder(buf)
 				err := dec.Decode(&curTask)
 				if err != nil {
-					log.Printf("Error parsing message: %s", err)
+					log.Errorf("Error parsing message: %s", err)
 					continue
 				}
 
@@ -355,7 +355,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 	for _, filepath := range taskStruct.ItemPath {
 		sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 		if err != nil {
-			log.Print("Error reading file metadata: ", err)
+			log.Errorf("Error reading file %s metadata: %s", filepath, err)
 			continue
 		}
 
@@ -394,10 +394,10 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
-				log.Printf("Removing file %s", filepath)
+				log.Debugf("Removing file %s", filepath)
 				err = toDataStore.Remove(filepath)
 				if err != nil {
-					log.Print("Error removing file ", filepath, ": ", err)
+					log.Error("Error removing file ", filepath, ": ", err)
 					continue
 				}
 
@@ -409,17 +409,17 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			//log.Debug("Started copying %s %d", filepath, worker)
 			src, err := fromDataStore.Open(filepath)
 			if err != nil {
-				log.Printf("Error opening src file ", filepath, ": ", err)
+				log.Error("Error opening src file ", filepath, ": ", err)
 				continue
 			}
 			dest, err := toDataStore.Create(filepath)
 			if err != nil {
-				log.Printf("Error opening dst file ", filepath, ": ", err)
+				log.Error("Error opening dst file ", filepath, ": ", err)
 				continue
 			}
 			bytesCopied, err := bufioprop.Copy(dest, src, 1048559)
 			if err != nil {
-				log.Printf("Error copying file ", filepath, ": ", err)
+				log.Error("Error copying file ", filepath, ": ", err)
 				continue
 			}
 
@@ -436,9 +436,9 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		case mode.IsDir():
 			// shouldn't happen
 		case mode&os.ModeSymlink != 0:
-			fmt.Println("symbolic link")
+			// fmt.Println("symbolic link")
 		case mode&os.ModeNamedPipe != 0:
-			fmt.Println("named pipe")
+			// fmt.Println("named pipe")
 		}
 	}
 }
@@ -452,7 +452,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	if dirPath != "/" {
 		sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
 		if err != nil {
-			log.Print("Error reading folder metadata or source folder not exists: ", err)
+			log.Errorf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
 			return
 		}
 
@@ -484,7 +484,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	dirsChan, err := fromDataStore.ListDir(dirPath, false)
 	if err != nil {
-		log.Print("Error listing folder: ", err)
+		log.Errorf("Error listing folder %s: %s", dirPath, err)
 		return
 	}
 
@@ -499,7 +499,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		enc := gob.NewEncoder(&buf)
 		err := enc.Encode(msgTask)
 		if err != nil {
-			log.Print("Error encoding dir message: ", err)
+			log.Error("Error encoding dir message: ", err)
 			continue
 		}
 
@@ -509,7 +509,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	filesChan, err := fromDataStore.ListDir(dirPath, true)
 	if err != nil {
-		log.Print("Error listing folder: ", err)
+		log.Errorf("Error listing folder %s: %s", dirPath, err)
 		return
 	}
 
@@ -524,7 +524,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		enc := gob.NewEncoder(&buf)
 		err = enc.Encode(msgTask)
 		if err != nil {
-			log.Print("Error encoding monitoring message: ", err)
+			log.Error("Error encoding monitoring message: ", err)
 			continue
 		}
 
@@ -537,7 +537,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 func initElasticLog() {
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Print("Error getting hostname: ", err)
+		log.Error("Error getting hostname: ", err)
 	}
 
 	client, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
@@ -627,7 +627,7 @@ func main() {
 				curFoldersCopiedCount := atomic.SwapUint64(&FoldersCopiedCount, 0)
 				hostname, err := os.Hostname()
 				if err != nil {
-					log.Print("Error getting hostname: ", err)
+					log.Error("Error getting hostname: ", err)
 				}
 				msgBody := monMessage{
 					"none",
@@ -641,7 +641,7 @@ func main() {
 				enc := gob.NewEncoder(&buf)
 				err = enc.Encode(msgBody)
 				if err != nil {
-					log.Print("Error encoding monitoring message: ", err)
+					log.Error("Error encoding message: ", err)
 					continue
 				}
 
@@ -679,7 +679,7 @@ func main() {
 		enc := gob.NewEncoder(&buf)
 		err := enc.Encode(msgTask)
 		if err != nil {
-			log.Print("Error encoding monitoring message: ", err)
+			log.Error("Error encoding message: ", err)
 			return
 		}
 
