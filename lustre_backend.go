@@ -13,14 +13,24 @@ import (
 )
 
 type LustreDatastore struct {
-	id          string
-	mountPath   string
-	shouldMount bool
-	canWrite    bool
+	id             string
+	mountPath      string
+	shouldMount    bool
+	canWrite       bool
+	skipFilesNewer int
+	skipFilesOlder int
 }
 
 func (l LustreDatastore) GetId() string {
 	return l.id
+}
+
+func (l LustreDatastore) GetSkipFilesNewer() int {
+	return l.skipFilesNewer
+}
+
+func (l LustreDatastore) GetSkipFilesOlder() int {
+	return l.skipFilesOlder
 }
 
 func (l LustreDatastore) GetMetadata(filePath string) (os.FileInfo, error) {

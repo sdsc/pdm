@@ -13,9 +13,13 @@ type = "posix"
 path = "/Users/username/tmp"
 mount = false
 write = true
+skip_files_newer_minutes=60
+skip_files_older_minutes=0
 
 [datasource.panda]
 type = "lustre"
 path = "/mnt/panda"
 mount = true
 write = false
+skip_files_newer_minutes=0
+skip_files_older_minutes=0

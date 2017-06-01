@@ -11,14 +11,24 @@ import (
 )
 
 type PosixDatastore struct {
-	id          string
-	mountPath   string
-	shouldMount bool
-	canWrite    bool
+	id             string
+	mountPath      string
+	shouldMount    bool
+	canWrite       bool
+	skipFilesNewer int
+	skipFilesOlder int
 }
 
 func (l PosixDatastore) GetId() string {
 	return l.id
+}
+
+func (l PosixDatastore) GetSkipFilesNewer() int {
+	return l.skipFilesNewer
+}
+
+func (l PosixDatastore) GetSkipFilesOlder() int {
+	return l.skipFilesOlder
 }
 
 func (l PosixDatastore) GetMetadata(filePath string) (os.FileInfo, error) {

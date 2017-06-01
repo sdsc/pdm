@@ -25,12 +25,14 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/Sirupsen/logrus"
-	"gopkg.in/sohlich/elogrus.v2"
 	"gopkg.in/olivere/elastic.v5"
+	"gopkg.in/sohlich/elogrus.v2"
 )
 
 type storage_backend interface {
 	GetId() string
+	GetSkipFilesNewer() int
+	GetSkipFilesOlder() int
 	GetMetadata(filepath string) (os.FileInfo, error)
 	Remove(filePath string) error
 	Open(filePath string) (io.ReadCloser, error)
@@ -359,8 +361,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 		//log.Debug("For file %s got meta %#v", filepath, sourceFileMeta)
 
-		//TODO: check date
-
 		switch mode := sourceFileMeta.Mode(); {
 		case mode.IsRegular():
 			//TODO: check stripes
@@ -370,6 +370,18 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
 			//sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
 			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
+
+			if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
+				log.Debugf("Skipping the file %s as too new", filepath)
+				atomic.AddUint64(&FilesSkippedCount, 1)
+				continue
+			}
+
+			if fromDataStore.GetSkipFilesOlder() > 0 && time.Since(sourceAtime).Minutes() > float64(fromDataStore.GetSkipFilesOlder()) {
+				log.Debugf("Skipping the file %s as too old", filepath)
+				atomic.AddUint64(&FilesSkippedCount, 1)
+				continue
+			}
 
 			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
 
@@ -531,7 +543,7 @@ func initElasticLog() {
 	client, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
 	if err != nil {
 		log.Panic(err)
-	}	
+	}
 	hook, err := elogrus.NewElasticHook(client, hostname, logrus.DebugLevel, "pdmlog")
 	if err != nil {
 		log.Panic(err)
@@ -552,7 +564,7 @@ var (
 
 	worker = app.Command("worker", "Run a worker")
 
-	copyCommand                = app.Command("copy", "Copy a folder or a file")
+	copyCommand         = app.Command("copy", "Copy a folder or a file")
 	rabbitmqServerParam = copyCommand.Flag("rabbitmq", "RabbitMQ connect string.").String()
 	isFileParam         = copyCommand.Flag("file", "Copy a file.").Bool()
 	sourceParam         = copyCommand.Arg("source", "The source mount").Required().String()
@@ -583,13 +595,17 @@ func main() {
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
 			case "posix":
 				data_backends[k] = PosixDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.write", k))}
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
 			}
 		}
 
