@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	//"runtime"
 	//"github.com/intel-hpdd/go-lustre/llapi"
 	"path"
 	"path/filepath"
@@ -60,6 +61,7 @@ func (l LustreDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Tim
 }
 
 func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string, error) {
+	//log.Debugf("#goroutines: %d\n", runtime.NumGoroutine())
 	outchan := make(chan []string)
 
 	cmdName := "lfs"
@@ -68,32 +70,37 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		cmdArgs = []string{"find", path.Join(l.mountPath, dirPath), "-maxdepth", "1", "-type", "d"}
 	}
 
+	//log.Debugf("Scanning %s, for files: %v", dirPath, listFiles)
 	cmd := exec.Command(cmdName, cmdArgs...)
 	cmdReader, err := cmd.StdoutPipe()
 	if err != nil {
+		log.Errorf("Error running lustre find: %v", err)
 		return nil, err
 	}
 
 	scanner := bufio.NewScanner(cmdReader)
 
-	go func() {
+	go func(outchan chan []string) {
 		defer close(outchan)
 		if !listFiles {
 			for scanner.Scan() {
 				folder := scanner.Text()
+				//log.Debugf("Found folder in %s: %s", dirPath, folder)
 				rel, err := filepath.Rel(l.mountPath, folder)
 				if err != nil {
-					log.Printf("Error resolving folder %s: %v", folder, err)
+					log.Errorf("Error resolving folder %s: %v", folder, err)
 					continue
 				}
 				if rel != "." && rel != dirPath {
-					outchan <- []string{rel}
+					sendList := []string{rel}
+					outchan <- sendList
 				}
 			}
 		} else {
 			var filesBuf []string
 			for scanner.Scan() {
 				if len(filesBuf) == FILE_CHUNKS {
+					//log.Debugf("Found %d files in %s", len(filesBuf), dirPath)
 					outchan <- filesBuf
 					filesBuf = nil
 				}
@@ -101,17 +108,18 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				file := scanner.Text()
 				rel, err := filepath.Rel(l.mountPath, file)
 				if err != nil {
-					log.Printf("Error resolving file %s: %v", file, err)
+					log.Errorf("Error resolving file %s: %v", file, err)
 					continue
 				}
 
 				filesBuf = append(filesBuf, rel)
 			}
 			if len(filesBuf) > 0 {
+				//log.Debugf("Found %d files in %s", len(filesBuf), dirPath)
 				outchan <- filesBuf
 			}
 		}
-	}()
+	}(outchan)
 
 	err = cmd.Start()
 	if err != nil {

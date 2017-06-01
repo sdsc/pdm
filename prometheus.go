@@ -96,7 +96,6 @@ func processMonitorStream() chan<- amqp.Delivery {
 				log.Printf("Error parsing message: %s", err)
 				continue
 			}
-			debug("Got new message %v", curMonMessage)
 			if curMonMessage.FilesCopied > 0 {
 				FilesCopiedCounter.WithLabelValues(curMonMessage.Node, curMonMessage.DataSource).Add(curMonMessage.FilesCopied)
 			}

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
-	. "github.com/tj/go-debug"
 	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 	"sync"
@@ -77,8 +77,6 @@ const FILE_CHUNKS = 1000
 const prometheusTopic = "prometheus"
 
 const tasksExchange = "tasks"
-
-var debug = Debug("worker")
 
 var data_backends = make(map[string]storage_backend)
 
@@ -359,7 +357,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			continue
 		}
 
-		log.Debug("For file %s got meta %#v", filepath, sourceFileMeta)
+		//log.Debug("For file %s got meta %#v", filepath, sourceFileMeta)
 
 		//TODO: check date
 
@@ -380,7 +378,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				if sourceFileMeta.Size() == destFileMeta.Size() &&
 					sourceFileMeta.Mode() == destFileMeta.Mode() &&
 					sourceMtime == destMtime {
-					log.Debug("File %s hasn't been changed", filepath)
+					//log.Debug("File %s hasn't been changed", filepath)
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
@@ -396,7 +394,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			defer atomic.AddUint64(&FilesCopiedCount, 1)
 
-			log.Debug("Started copying %s %d", filepath, worker)
+			//log.Debug("Started copying %s %d", filepath, worker)
 			src, err := fromDataStore.Open(filepath)
 			if err != nil {
 				log.Printf("Error opening src file ", filepath, ": ", err)
@@ -422,7 +420,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			toDataStore.Chmod(filepath, sourceFileMeta.Mode())
 			toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
 
-			log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
+			//log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
 		case mode.IsDir():
 			// shouldn't happen
 		case mode&os.ModeSymlink != 0:
@@ -435,7 +433,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
 	dirPath := taskStruct.ItemPath[0]
-	log.Debug("Processing folder %s", dirPath)
+	//log.Debug("Processing folder %s", dirPath)
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
 
@@ -447,7 +445,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-			log.Debug("Dest dir exists: %#v", destDirMeta)
+			//log.Debug("Dest dir exists: %#v", destDirMeta)
 
 			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
 			sourceDirUid := int(sourceDirStat.Uid)
@@ -458,13 +456,11 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			destDirGid := int(destDirStat.Uid)
 
 			if destDirMeta.Mode() != sourceDirMeta.Mode() {
-				log.Debug("Set dir chmod")
 				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
 			}
 
 			if sourceDirUid != destDirUid || sourceDirGid != destDirGid {
 				toDataStore.Lchown(dirPath, sourceDirUid, sourceDirGid)
-				log.Debug("Set dir chown")
 			}
 
 		} else {
@@ -481,7 +477,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	}
 
 	for dir := range dirsChan {
-		log.Debug("Found folder %s", dir)
+		//log.Debug("Found folder %s", dir)
 
 		msgTask := task{
 			"copy",
@@ -506,7 +502,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	}
 
 	for files := range filesChan {
-		log.Debug("Found file %s", files)
+		//log.Debug("Found file %s", files)
 
 		msgTask := task{
 			"copy",
@@ -527,16 +523,23 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 }
 
 func initElasticLog() {
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Print("Error getting hostname: ", err)
+	}
+
 	client, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
 	if err != nil {
 		log.Panic(err)
 	}	
-	hook, err := elogrus.NewElasticHook(client, "localhost", logrus.DebugLevel, "pdmlog")
+	hook, err := elogrus.NewElasticHook(client, hostname, logrus.DebugLevel, "pdmlog")
 	if err != nil {
 		log.Panic(err)
 	}
 	log.Level = logrus.DebugLevel
 	log.Hooks.Add(hook)
+
+	log.Out = ioutil.Discard
 
 	// log.WithFields(logrus.Fields{
 	// 	"name": "joe",
@@ -549,12 +552,12 @@ var (
 
 	worker = app.Command("worker", "Run a worker")
 
-	copy                = app.Command("copy", "Copy a folder or a file")
-	rabbitmqServerParam = copy.Flag("rabbitmq", "RabbitMQ connect string.").String()
-	isFileParam         = copy.Flag("file", "Copy a file.").Bool()
-	sourceParam         = copy.Arg("source", "The source mount").Required().String()
-	targetParam         = copy.Arg("target", "The target mount").Required().String()
-	pathParam           = copy.Arg("path", "The path to copy").Required().String()
+	copyCommand                = app.Command("copy", "Copy a folder or a file")
+	rabbitmqServerParam = copyCommand.Flag("rabbitmq", "RabbitMQ connect string.").String()
+	isFileParam         = copyCommand.Flag("file", "Copy a file.").Bool()
+	sourceParam         = copyCommand.Arg("source", "The source mount").Required().String()
+	targetParam         = copyCommand.Arg("target", "The target mount").Required().String()
+	pathParam           = copyCommand.Arg("path", "The path to copy").Required().String()
 
 	monitor = app.Command("monitor", "Start monitoring daemon")
 )
@@ -632,7 +635,7 @@ func main() {
 			}
 		}()
 
-	case copy.FullCommand():
+	case copyCommand.FullCommand():
 		rabbitmqServer := ""
 
 		if os.Getenv("PDM_RABBITMQ") != "" {
