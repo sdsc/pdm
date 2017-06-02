@@ -328,7 +328,7 @@ func processFilesStream() chan<- amqp.Delivery {
 
 func processFoldersStream() chan<- amqp.Delivery {
 	msgs := make(chan amqp.Delivery)
-	for i := 0; i <= viper.GetInt("folder_workers"); i++ {
+	for i := 0; i <= viper.GetInt("dir_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
 				var curTask task
