@@ -70,9 +70,10 @@ func (l LustreDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Tim
 	return os.Chtimes(path.Join(l.mountPath, dirPath), atime, mtime)
 }
 
-func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string, error) {
+func (l LustreDatastore) ListDir(dirPath string, listFiles bool) ([]string, error) {
 	//log.Debugf("#goroutines: %d\n", runtime.NumGoroutine())
-	outchan := make(chan []string)
+
+	var retList []string
 
 	cmdName := "lfs"
 	cmdArgs := []string{"find", path.Join(l.mountPath, dirPath), "-maxdepth", "1", "!", "-type", "d"}
@@ -90,51 +91,36 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 
 	scanner := bufio.NewScanner(cmdReader)
 
-	go func(outchan chan []string) {
-		defer close(outchan)
-		if !listFiles {
-			for scanner.Scan() {
-				folder := scanner.Text()
-				//log.Debugf("Found folder in %s: %s", dirPath, folder)
-				rel, err := filepath.Rel(l.mountPath, folder)
-				if err != nil {
-					log.Errorf("Error resolving folder %s: %v", folder, err)
-					continue
-				}
-				if rel != "." && rel != dirPath {
-					sendList := []string{rel}
-					outchan <- sendList
-				}
-			}
-		} else {
-			var filesBuf []string
-			for scanner.Scan() {
-				if len(filesBuf) == FILE_CHUNKS {
-					//log.Debugf("Found %d files in %s", len(filesBuf), dirPath)
-					outchan <- filesBuf
-					filesBuf = nil
-				}
-
-				file := scanner.Text()
-				rel, err := filepath.Rel(l.mountPath, file)
-				if err != nil {
-					log.Errorf("Error resolving file %s: %v", file, err)
-					continue
-				}
-
-				filesBuf = append(filesBuf, rel)
-			}
-			if len(filesBuf) > 0 {
-				//log.Debugf("Found %d files in %s", len(filesBuf), dirPath)
-				outchan <- filesBuf
-			}
-		}
-	}(outchan)
-
 	err = cmd.Start()
 	if err != nil {
 		return nil, err
 	}
 
-	return outchan, nil
+	if !listFiles {
+		for scanner.Scan() {
+			folder := scanner.Text()
+			//log.Debugf("Found folder in %s: %s", dirPath, folder)
+			rel, err := filepath.Rel(l.mountPath, folder)
+			if err != nil {
+				log.Errorf("Error resolving folder %s: %v", folder, err)
+				continue
+			}
+			if rel != "." && rel != dirPath {
+				retList = append(retList, rel)
+			}
+		}
+	} else {
+		for scanner.Scan() {
+			file := scanner.Text()
+			rel, err := filepath.Rel(l.mountPath, file)
+			if err != nil {
+				log.Errorf("Error resolving file %s: %v", file, err)
+				continue
+			}
+
+			retList = append(retList, rel)
+		}
+	}
+
+	return retList, nil
 }
