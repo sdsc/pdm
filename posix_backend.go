@@ -32,7 +32,7 @@ func (l PosixDatastore) GetSkipFilesOlder() int {
 }
 
 func (l PosixDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
-	return os.Stat(path.Join(l.mountPath, filePath))
+	return os.Lstat(path.Join(l.mountPath, filePath))
 }
 
 func (l PosixDatastore) Remove(filePath string) error {
