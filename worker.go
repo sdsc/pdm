@@ -41,7 +41,7 @@ type storage_backend interface {
 	Chmod(filePath string, perm os.FileMode) error
 	Mkdir(dirPath string, perm os.FileMode) error
 	Chtimes(dirPath string, atime time.Time, mtime time.Time) error
-	ListDir(dirPath string, listFiles bool) ([]string, error)
+	ListDir(dirPath string, listFiles bool) (chan []string, error)
 }
 
 type monitoring_backend interface {
@@ -367,8 +367,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			sourceMtime := sourceFileMeta.ModTime()
 			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-			//sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
-			sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
+			sourceAtime := time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
+			//sourceAtime := time.Unix(int64(sourceStat.Atimespec.Sec), int64(sourceStat.Atimespec.Nsec))
 			// sourceCtime = time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
 
 			if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
@@ -394,7 +394,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
-				log.Debugf("Reuploading file %s", filepath)
+				log.Debugf("Removing file %s", filepath)
 				err = toDataStore.Remove(filepath)
 				if err != nil {
 					log.Error("Error removing file ", filepath, ": ", err)
@@ -425,8 +425,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			src.Close()
 			dest.Close()
-
-			log.Debug("Copied file ", filepath)
 
 			atomic.AddUint64(&BytesCount, uint64(bytesCopied))
 
@@ -484,18 +482,18 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 	}
 
-	dirsList, err := fromDataStore.ListDir(dirPath, false)
+	dirsChan, err := fromDataStore.ListDir(dirPath, false)
 	if err != nil {
 		log.Errorf("Error listing folder %s: %s", dirPath, err)
 		return
 	}
 
-	for _, dir := range dirsList {
+	for dir := range dirsChan {
 		//log.Debug("Found folder %s", dir)
 
 		msgTask := task{
 			"copy",
-			[]string{dir}}
+			dir}
 
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
@@ -509,31 +507,30 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		pubChan <- msg
 	}
 
-	filesList, err := fromDataStore.ListDir(dirPath, true)
+	filesChan, err := fromDataStore.ListDir(dirPath, true)
 	if err != nil {
 		log.Errorf("Error listing folder %s: %s", dirPath, err)
 		return
 	}
 
-	// for _, files := range filesList {
+	for files := range filesChan {
 		//log.Debug("Found file %s", files)
 
 		msgTask := task{
 			"copy",
-			filesList}
+			files}
 
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
 		err = enc.Encode(msgTask)
 		if err != nil {
 			log.Error("Error encoding monitoring message: ", err)
-			return
-			// continue
+			continue
 		}
 
 		msg := message{buf.Bytes(), "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 		pubChan <- msg
-	// }
+	}
 
 }
 
@@ -582,7 +579,6 @@ func main() {
 	go func() {
 		http.ListenAndServe(":8080", nil)
 	}()
-	log.Level = logrus.DebugLevel
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case worker.FullCommand():

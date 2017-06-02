@@ -63,55 +63,61 @@ func (l PosixDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Time
 	return os.Chtimes(path.Join(l.mountPath, dirPath), atime, mtime)
 }
 
-func (l PosixDatastore) ListDir(dirPath string, listFiles bool) ([]string, error) {
-	var retList []string
+func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, error) {
+	outchan := make(chan []string)
 
 	cmdName := "find"
-	cmdArgs := []string{path.Join(l.mountPath, dirPath), "-maxdepth", "1", "!", "-type", "d"}
+	cmdArgs := []string{path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "!", "-type", "d"}
 	if !listFiles {
-		cmdArgs = []string{path.Join(l.mountPath, dirPath), "-maxdepth", "1", "-type", "d"}
+		cmdArgs = []string{path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "-type", "d"}
 	}
 
-	//log.Debugf("Scanning %s, for files: %v", dirPath, listFiles)
 	cmd := exec.Command(cmdName, cmdArgs...)
 	cmdReader, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Errorf("Error running lustre find: %v", err)
 		return nil, err
 	}
 
 	scanner := bufio.NewScanner(cmdReader)
+	go func() {
+		defer close(outchan)
+		if !listFiles {
+			for scanner.Scan() {
+				folder := scanner.Text()
+				rel, err := filepath.Rel(l.mountPath, folder)
+				if err != nil {
+					log.Printf("Error resolving folder %s: %v", folder, err)
+					continue
+				}
+				outchan <- []string{rel}
+			}
+		} else {
+			var filesBuf []string
+			for scanner.Scan() {
+				if len(filesBuf) == FILE_CHUNKS {
+					outchan <- filesBuf
+					filesBuf = nil
+				}
+
+				file := scanner.Text()
+				rel, err := filepath.Rel(l.mountPath, file)
+				if err != nil {
+					log.Printf("Error resolving file %s: %v", file, err)
+					continue
+				}
+
+				filesBuf = append(filesBuf, rel)
+			}
+			if len(filesBuf) > 0 {
+				outchan <- filesBuf
+			}
+		}
+	}()
 
 	err = cmd.Start()
 	if err != nil {
 		return nil, err
 	}
 
-	if !listFiles {
-		for scanner.Scan() {
-			folder := scanner.Text()
-			//log.Debugf("Found folder in %s: %s", dirPath, folder)
-			rel, err := filepath.Rel(l.mountPath, folder)
-			if err != nil {
-				log.Errorf("Error resolving folder %s: %v", folder, err)
-				continue
-			}
-			if rel != "." && rel != dirPath {
-				retList = append(retList, rel)
-			}
-		}
-	} else {
-		for scanner.Scan() {
-			file := scanner.Text()
-			rel, err := filepath.Rel(l.mountPath, file)
-			if err != nil {
-				log.Errorf("Error resolving file %s: %v", file, err)
-				continue
-			}
-
-			retList = append(retList, rel)
-		}
-	}
-
-	return retList, nil
+	return outchan, nil
 }
