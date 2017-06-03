@@ -343,8 +343,12 @@ func processFoldersStream() chan<- amqp.Delivery {
 					continue
 				}
 
-				processFolder(fromDataStore, toDataStore, curTask)
-				msg.Acknowledger.Ack(msg.DeliveryTag, false)
+				err = processFolder(fromDataStore, toDataStore, curTask)
+				if err != nil {
+					msg.Acknowledger.Nack(msg.DeliveryTag, false, true)
+				} else {
+					msg.Acknowledger.Ack(msg.DeliveryTag, false)
+				}
 			}
 		}(i)
 	}
@@ -443,7 +447,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 	}
 }
 
-func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
+func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) error {
 	dirPath := taskStruct.ItemPath[0]
 	//log.Debug("Processing folder %s", dirPath)
 
@@ -453,7 +457,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
 		if err != nil {
 			log.Errorf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
-			return
+			return err
 		}
 
 		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
@@ -485,7 +489,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	dirsChan, err := fromDataStore.ListDir(dirPath, false)
 	if err != nil {
 		log.Errorf("Error listing folder %s: %s", dirPath, err)
-		return
+		return err
 	}
 
 	for dir := range dirsChan {
@@ -510,7 +514,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	filesChan, err := fromDataStore.ListDir(dirPath, true)
 	if err != nil {
 		log.Errorf("Error listing folder %s: %s", dirPath, err)
-		return
+		return err
 	}
 
 	for files := range filesChan {
@@ -531,7 +535,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		msg := message{buf.Bytes(), "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 		pubChan <- msg
 	}
-
+	return nil
 }
 
 func initElasticLog() {
