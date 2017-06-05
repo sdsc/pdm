@@ -34,6 +34,7 @@ type storage_backend interface {
 	Readlink(filePath string) (string, error)
 	Symlink(pointTo, filePath string) error
 	Remove(filePath string) error
+	RemoveAll(filePath string) error
 	Open(filePath string) (io.ReadCloser, error)
 	Create(filePath string) (io.WriteCloser, error)
 	Lchown(filePath string, uid, gid int) error
@@ -89,6 +90,7 @@ type message struct {
 }
 
 type task struct {
+	// One of: "copy", "clear"
 	Action   string
 	ItemPath []string
 }
@@ -329,12 +331,19 @@ var (
 
 	worker = app.Command("worker", "Run a worker")
 
-	copyCommand         = app.Command("copy", "Copy a folder or a file")
-	rabbitmqServerParam = copyCommand.Flag("rabbitmq", "RabbitMQ connect string.").String()
-	isFileParam         = copyCommand.Flag("file", "Copy a file.").Bool()
-	sourceParam         = copyCommand.Arg("source", "The source mount").Required().String()
-	targetParam         = copyCommand.Arg("target", "The target mount").Required().String()
-	pathParam           = copyCommand.Arg("path", "The path to copy").Required().String()
+	copyCommand             = app.Command("copy", "Copy a folder or a file")
+	rabbitmqServerCopyParam = copyCommand.Flag("rabbitmq", "RabbitMQ connect string.").String()
+	isFileCopyParam         = copyCommand.Flag("file", "Copy a file.").Bool()
+	sourceCopyParam         = copyCommand.Arg("source", "The source mount").Required().String()
+	targetCopyParam         = copyCommand.Arg("target", "The target mount").Required().String()
+	pathCopyParam           = copyCommand.Arg("path", "The path to copy").Required().String()
+
+	clearCommand             = app.Command("clear", "Clear a folder or a file on target according to source")
+	rabbitmqServerClearParam = clearCommand.Flag("rabbitmq", "RabbitMQ connect string.").String()
+	isFileClearParam         = clearCommand.Flag("file", "Clear a file.").Bool()
+	sourceClearParam         = clearCommand.Arg("source", "The source mount").Required().String()
+	targetClearParam         = clearCommand.Arg("target", "The target mount").Required().String()
+	pathClearParam           = clearCommand.Arg("path", "The path to clear").Required().String()
 
 	monitor = app.Command("monitor", "Start monitoring daemon")
 )
@@ -429,8 +438,8 @@ func main() {
 
 		if os.Getenv("PDM_RABBITMQ") != "" {
 			rabbitmqServer = os.Getenv("PDM_RABBITMQ")
-		} else if *rabbitmqServerParam != "" {
-			rabbitmqServer = *rabbitmqServerParam
+		} else if *rabbitmqServerCopyParam != "" {
+			rabbitmqServer = *rabbitmqServerCopyParam
 		}
 
 		pub_chan := make(chan message)
@@ -440,13 +449,13 @@ func main() {
 		}()
 
 		queuePrefix := "dir"
-		if *isFileParam {
+		if *isFileCopyParam {
 			queuePrefix = "file"
 		}
 
 		msgTask := task{
 			"copy",
-			[]string{*pathParam}}
+			[]string{*pathCopyParam}}
 
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
@@ -456,7 +465,47 @@ func main() {
 			return
 		}
 
-		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceParam + "." + *targetParam}
+		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceCopyParam + "." + *targetCopyParam}
+		pub_chan <- msg
+		close(pub_chan)
+
+	case clearCommand.FullCommand():
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			log.Level = logrus.DebugLevel
+		}
+
+		rabbitmqServer := ""
+
+		if os.Getenv("PDM_RABBITMQ") != "" {
+			rabbitmqServer = os.Getenv("PDM_RABBITMQ")
+		} else if *rabbitmqServerClearParam != "" {
+			rabbitmqServer = *rabbitmqServerClearParam
+		}
+
+		pub_chan := make(chan message)
+
+		go func() {
+			publish(redial(ctx, rabbitmqServer), pub_chan, done)
+		}()
+
+		queuePrefix := "dir"
+		if *isFileClearParam {
+			queuePrefix = "file"
+		}
+
+		msgTask := task{
+			"clear",
+			[]string{*pathClearParam}}
+
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		err := enc.Encode(msgTask)
+		if err != nil {
+			log.Error("Error encoding message: ", err)
+			return
+		}
+
+		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceClearParam + "." + *targetClearParam}
 		pub_chan <- msg
 		close(pub_chan)
 

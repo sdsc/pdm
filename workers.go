@@ -18,13 +18,10 @@ func processFilesStream() chan<- amqp.Delivery {
 	for i := 0; i < viper.GetInt("file_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				var curTask task
 				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
 				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
 
-				buf := bytes.NewBuffer(msg.Body)
-				dec := gob.NewDecoder(buf)
-				err := dec.Decode(&curTask)
+				curTask, err := decodeTask(msg.Body)
 				if err != nil {
 					log.Errorf("Error parsing message: %s", err)
 					continue
@@ -43,13 +40,10 @@ func processFoldersStream() chan<- amqp.Delivery {
 	for i := 0; i < viper.GetInt("dir_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				var curTask task
 				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
 				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
 
-				buf := bytes.NewBuffer(msg.Body)
-				dec := gob.NewDecoder(buf)
-				err := dec.Decode(&curTask)
+				curTask, err := decodeTask(msg.Body)
 				if err != nil {
 					log.Errorf("Error parsing message: %s", err)
 					continue
@@ -68,130 +62,149 @@ func processFoldersStream() chan<- amqp.Delivery {
 }
 
 func processFiles(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
-	for _, filepath := range taskStruct.ItemPath {
-		sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
-		if err != nil {
-			if os.IsNotExist(err) { // the user already removed the source file
-				log.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
-			} else {
-				log.Errorf("Error reading file %s metadata: %s", filepath, err)
+	switch taskStruct.Action {
+	case "copy":
+
+		for _, filepath := range taskStruct.ItemPath {
+			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
+			if err != nil {
+				if os.IsNotExist(err) { // the user already removed the source file
+					log.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
+				} else {
+					log.Errorf("Error reading file %s metadata: %s", filepath, err)
+				}
+				continue
 			}
-			continue
+
+			//log.Debug("For file %s got meta %#v", filepath, sourceFileMeta)
+
+			switch mode := sourceFileMeta.Mode(); {
+			case mode.IsRegular():
+				//TODO: check stripes
+
+				sourceMtime := sourceFileMeta.ModTime()
+				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
+				sourceAtime := getAtime(sourceStat)
+
+				if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
+					log.Debugf("Skipping the file %s as too new", filepath)
+					atomic.AddUint64(&FilesSkippedCount, 1)
+					continue
+				}
+
+				if fromDataStore.GetSkipFilesOlder() > 0 && time.Since(sourceAtime).Minutes() > float64(fromDataStore.GetSkipFilesOlder()) {
+					log.Debugf("Skipping the file %s as too old", filepath)
+					atomic.AddUint64(&FilesSkippedCount, 1)
+					continue
+				}
+
+				if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
+
+					destMtime := destFileMeta.ModTime()
+
+					if sourceFileMeta.Size() == destFileMeta.Size() &&
+						sourceFileMeta.Mode() == destFileMeta.Mode() &&
+						sourceMtime == destMtime {
+						//log.Debug("File %s hasn't been changed", filepath)
+						atomic.AddUint64(&FilesSkippedCount, 1)
+						continue
+					}
+					log.Debugf("Removing file %s", filepath)
+					err = toDataStore.Remove(filepath)
+					if err != nil {
+						log.Error("Error removing file ", filepath, ": ", err)
+						continue
+					}
+
+					// TODO: setstripe
+				}
+
+				defer atomic.AddUint64(&FilesCopiedCount, 1)
+
+				//log.Debug("Started copying %s %d", filepath, worker)
+				src, err := fromDataStore.Open(filepath)
+				if err != nil {
+					log.Error("Error opening src file ", filepath, ": ", err)
+					continue
+				}
+				dest, err := toDataStore.Create(filepath)
+				if err != nil {
+					log.Error("Error opening dst file ", filepath, ": ", err)
+					continue
+				}
+				bytesCopied, err := bufioprop.Copy(dest, src, 1048559)
+				if err != nil {
+					log.Error("Error copying file ", filepath, ": ", err)
+					continue
+				}
+
+				src.Close()
+				dest.Close()
+
+				atomic.AddUint64(&BytesCount, uint64(bytesCopied))
+
+				toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
+				toDataStore.Chmod(filepath, sourceFileMeta.Mode())
+				toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
+
+				//log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
+			case mode.IsDir():
+				// shouldn't happen
+				log.Error("File ", filepath, " appeared to be a folder")
+			case mode&os.ModeSymlink != 0:
+				sourceMtime := sourceFileMeta.ModTime()
+				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
+				sourceAtime := getAtime(sourceStat)
+				if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest link exists
+					destMtime := destFileMeta.ModTime()
+
+					if sourceFileMeta.Mode() == destFileMeta.Mode() &&
+						sourceMtime == destMtime {
+						atomic.AddUint64(&FilesSkippedCount, 1)
+						continue
+					}
+					log.Debugf("Removing symlink %s", filepath)
+					err = toDataStore.Remove(filepath)
+					if err != nil {
+						log.Error("Error removing symlink ", filepath, ": ", err)
+						continue
+					}
+				}
+
+				defer atomic.AddUint64(&FilesCopiedCount, 1)
+				linkTarget, err := fromDataStore.Readlink(filepath)
+				if err != nil {
+					log.Error("Error reading symlink ", filepath, ": ", err)
+					continue
+				}
+
+				err = toDataStore.Symlink(linkTarget, filepath)
+				if err != nil {
+					log.Error("Error seting symlink ", filepath, ": ", err)
+					continue
+				}
+
+				toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
+				toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
+
+			case mode&os.ModeNamedPipe != 0:
+				log.Error("File ", filepath, " is a named pipe. Not supported yet.")
+			}
 		}
-
-		//log.Debug("For file %s got meta %#v", filepath, sourceFileMeta)
-
-		switch mode := sourceFileMeta.Mode(); {
-		case mode.IsRegular():
-			//TODO: check stripes
-
-			sourceMtime := sourceFileMeta.ModTime()
-			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-			sourceAtime := getAtime(sourceStat)
-
-			if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
-				log.Debugf("Skipping the file %s as too new", filepath)
-				atomic.AddUint64(&FilesSkippedCount, 1)
-				continue
-			}
-
-			if fromDataStore.GetSkipFilesOlder() > 0 && time.Since(sourceAtime).Minutes() > float64(fromDataStore.GetSkipFilesOlder()) {
-				log.Debugf("Skipping the file %s as too old", filepath)
-				atomic.AddUint64(&FilesSkippedCount, 1)
-				continue
-			}
-
-			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
-
-				destMtime := destFileMeta.ModTime()
-
-				if sourceFileMeta.Size() == destFileMeta.Size() &&
-					sourceFileMeta.Mode() == destFileMeta.Mode() &&
-					sourceMtime == destMtime {
-					//log.Debug("File %s hasn't been changed", filepath)
-					atomic.AddUint64(&FilesSkippedCount, 1)
-					continue
+	case "clear":
+		for _, filepath := range taskStruct.ItemPath {
+			_, err := fromDataStore.GetMetadata(filepath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					log.Debugf("Error reading file %s metadata, not exists, removing from target: %s", filepath, err)
+					err = toDataStore.Remove(filepath)
+					if err != nil {
+						log.Error("Error clearing target file ", filepath, ": ", err)
+					}
+				} else {
+					log.Errorf("Error reading file %s metadata: %s", filepath, err)
 				}
-				log.Debugf("Removing file %s", filepath)
-				err = toDataStore.Remove(filepath)
-				if err != nil {
-					log.Error("Error removing file ", filepath, ": ", err)
-					continue
-				}
-
-				// TODO: setstripe
-			}
-
-			defer atomic.AddUint64(&FilesCopiedCount, 1)
-
-			//log.Debug("Started copying %s %d", filepath, worker)
-			src, err := fromDataStore.Open(filepath)
-			if err != nil {
-				log.Error("Error opening src file ", filepath, ": ", err)
-				continue
-			}
-			dest, err := toDataStore.Create(filepath)
-			if err != nil {
-				log.Error("Error opening dst file ", filepath, ": ", err)
-				continue
-			}
-			bytesCopied, err := bufioprop.Copy(dest, src, 1048559)
-			if err != nil {
-				log.Error("Error copying file ", filepath, ": ", err)
-				continue
-			}
-
-			src.Close()
-			dest.Close()
-
-			atomic.AddUint64(&BytesCount, uint64(bytesCopied))
-
-			toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
-			toDataStore.Chmod(filepath, sourceFileMeta.Mode())
-			toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
-
-			//log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
-		case mode.IsDir():
-			// shouldn't happen
-			log.Error("File ", filepath, " appeared to be a folder")
-		case mode&os.ModeSymlink != 0:
-			sourceMtime := sourceFileMeta.ModTime()
-			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-			sourceAtime := getAtime(sourceStat)
-			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest link exists
-				destMtime := destFileMeta.ModTime()
-
-				if sourceFileMeta.Mode() == destFileMeta.Mode() &&
-					sourceMtime == destMtime {
-					atomic.AddUint64(&FilesSkippedCount, 1)
-					continue
-				}
-				log.Debugf("Removing symlink %s", filepath)
-				err = toDataStore.Remove(filepath)
-				if err != nil {
-					log.Error("Error removing symlink ", filepath, ": ", err)
-					continue
-				}
-			}
-
-			defer atomic.AddUint64(&FilesCopiedCount, 1)
-			linkTarget, err := fromDataStore.Readlink(filepath)
-			if err != nil {
-				log.Error("Error reading symlink ", filepath, ": ", err)
-				continue
-			}
-
-			err = toDataStore.Symlink(linkTarget, filepath)
-			if err != nil {
-				log.Error("Error seting symlink ", filepath, ": ", err)
-				continue
-			}
-
-			toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
-			toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
-
-		case mode&os.ModeNamedPipe != 0:
-			log.Error("File ", filepath, " is a named pipe. Not supported yet.")
+			} // else the source file exists - do nothing
 		}
 	}
 }
@@ -201,90 +214,165 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
 
-	if dirPath != "/" {
-		sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
-		if err != nil {
-			if os.IsNotExist(err) { // the user already removed the source folder
-				log.Debugf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
-				return nil
+	switch taskStruct.Action {
+	case "copy":
+
+		if dirPath != "/" {
+			sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
+			if err != nil {
+				if os.IsNotExist(err) { // the user already removed the source folder
+					log.Debugf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
+					return nil
+				} else {
+					log.Errorf("Error reading folder %s: %s", dirPath, err)
+					return err
+				}
+			}
+
+			if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
+				sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
+				sourceDirUid := int(sourceDirStat.Uid)
+				sourceDirGid := int(sourceDirStat.Uid)
+
+				destDirStat := destDirMeta.Sys().(*syscall.Stat_t)
+				destDirUid := int(destDirStat.Uid)
+				destDirGid := int(destDirStat.Uid)
+
+				if destDirMeta.Mode() != sourceDirMeta.Mode() {
+					toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
+				}
+
+				if sourceDirUid != destDirUid || sourceDirGid != destDirGid {
+					toDataStore.Lchown(dirPath, sourceDirUid, sourceDirGid)
+				}
+
 			} else {
-				log.Errorf("Error reading folder %s: %s", dirPath, err)
-				return err
-			}
-		}
-
-		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
-			sourceDirUid := int(sourceDirStat.Uid)
-			sourceDirGid := int(sourceDirStat.Uid)
-
-			destDirStat := destDirMeta.Sys().(*syscall.Stat_t)
-			destDirUid := int(destDirStat.Uid)
-			destDirGid := int(destDirStat.Uid)
-
-			if destDirMeta.Mode() != sourceDirMeta.Mode() {
+				toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
 				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
+				toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
+			}
+		}
+
+		dirsChan, err := fromDataStore.ListDir(dirPath, false)
+		if err != nil {
+			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			return err
+		}
+
+		for dir := range dirsChan {
+			msgTask := task{
+				"copy",
+				dir}
+
+			taskEnc, err := encodeTask(msgTask)
+			if err != nil {
+				log.Error("Error encoding dir message: ", err)
+				continue
 			}
 
-			if sourceDirUid != destDirUid || sourceDirGid != destDirGid {
-				toDataStore.Lchown(dirPath, sourceDirUid, sourceDirGid)
+			msg := message{taskEnc, "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			pubChan <- msg
+		}
+
+		filesChan, err := fromDataStore.ListDir(dirPath, true)
+		if err != nil {
+			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			return err
+		}
+
+		for files := range filesChan {
+			msgTask := task{
+				"copy",
+				files}
+
+			taskEnc, err := encodeTask(msgTask)
+			if err != nil {
+				log.Error("Error encoding monitoring message: ", err)
+				continue
 			}
 
-		} else {
-			toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
-			toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
-			toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
+			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			pubChan <- msg
 		}
-	}
 
-	dirsChan, err := fromDataStore.ListDir(dirPath, false)
-	if err != nil {
-		log.Errorf("Error listing folder %s: %s", dirPath, err)
-		return err
-	}
+	case "clear":
+		if dirPath != "/" {
+			_, err := fromDataStore.GetMetadata(dirPath)
+			if err != nil {
+				if os.IsNotExist(err) { // the user already removed the source folder
+					log.Debugf("Source folder not exists: %s", dirPath, err)
+					toDataStore.RemoveAll(dirPath)
+					return nil
+				} else {
+					log.Errorf("Error reading source folder %s: %s", dirPath, err)
+					return err
+				}
+			}
+		}
 
-	for dir := range dirsChan {
-		//log.Debug("Found folder %s", dir)
-
-		msgTask := task{
-			"copy",
-			dir}
-
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		err := enc.Encode(msgTask)
+		dirsChan, err := toDataStore.ListDir(dirPath, false)
 		if err != nil {
-			log.Error("Error encoding dir message: ", err)
-			continue
+			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			return err
 		}
 
-		msg := message{buf.Bytes(), "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
-		pubChan <- msg
-	}
+		for dir := range dirsChan {
+			msgTask := task{
+				"clear",
+				dir}
 
-	filesChan, err := fromDataStore.ListDir(dirPath, true)
-	if err != nil {
-		log.Errorf("Error listing folder %s: %s", dirPath, err)
-		return err
-	}
+			taskEnc, err := encodeTask(msgTask)
+			if err != nil {
+				log.Error("Error encoding dir message: ", err)
+				continue
+			}
 
-	for files := range filesChan {
-		//log.Debug("Found file %s", files)
+			msg := message{taskEnc, "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			pubChan <- msg
+		}
 
-		msgTask := task{
-			"copy",
-			files}
-
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		err = enc.Encode(msgTask)
+		filesChan, err := toDataStore.ListDir(dirPath, true)
 		if err != nil {
-			log.Error("Error encoding monitoring message: ", err)
-			continue
+			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			return err
 		}
 
-		msg := message{buf.Bytes(), "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
-		pubChan <- msg
+		for files := range filesChan {
+			msgTask := task{
+				"clear",
+				files}
+
+			taskEnc, err := encodeTask(msgTask)
+			if err != nil {
+				log.Error("Error encoding monitoring message: ", err)
+				continue
+			}
+
+			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			pubChan <- msg
+		}
 	}
+
 	return nil
+}
+
+func encodeTask(taskStruct task) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(taskStruct)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func decodeTask(taskBytes []byte) (task, error) {
+	var curTask task
+	buf := bytes.NewBuffer(taskBytes)
+	dec := gob.NewDecoder(buf)
+	err := dec.Decode(&curTask)
+	if err != nil {
+		return curTask, err
+	}
+	return curTask, nil
 }

@@ -47,6 +47,10 @@ func (l PosixDatastore) Remove(filePath string) error {
 	return os.Remove(path.Join(l.mountPath, filePath))
 }
 
+func (l PosixDatastore) RemoveAll(filePath string) error {
+	return os.RemoveAll(path.Join(l.mountPath, filePath))
+}
+
 func (l PosixDatastore) Open(filePath string) (io.ReadCloser, error) {
 	return os.Open(path.Join(l.mountPath, filePath))
 }
