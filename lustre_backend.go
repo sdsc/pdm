@@ -90,6 +90,11 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 
 	scanner := bufio.NewScanner(cmdReader)
 
+	err = cmd.Start()
+	if err != nil {
+		return nil, err
+	}
+
 	go func(outchan chan []string) {
 		defer close(outchan)
 		if !listFiles {
@@ -129,12 +134,9 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				outchan <- filesBuf
 			}
 		}
+		cmd.Wait()
 	}(outchan)
 
-	err = cmd.Start()
-	if err != nil {
-		return nil, err
-	}
 
 	return outchan, nil
 }

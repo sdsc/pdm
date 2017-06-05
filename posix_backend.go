@@ -79,6 +79,12 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 	}
 
 	scanner := bufio.NewScanner(cmdReader)
+
+	err = cmd.Start()
+	if err != nil {
+		return nil, err
+	}
+
 	go func() {
 		defer close(outchan)
 		if !listFiles {
@@ -112,12 +118,8 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 				outchan <- filesBuf
 			}
 		}
+		cmd.Wait()
 	}()
-
-	err = cmd.Start()
-	if err != nil {
-		return nil, err
-	}
 
 	return outchan, nil
 }
