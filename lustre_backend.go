@@ -37,10 +37,13 @@ func (l LustreDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
 	return os.Lstat(path.Join(l.mountPath, filePath))
 }
 
-//func (l LustreDatastore) GetSpecMetadata(filePath string) (map[string]interface{}, error) {
-//	retMeta := make(map[string]interface{})
-//	return
-//}
+func (l LustreDatastore) Readlink(filePath string) (string, error) {
+	return os.Readlink(path.Join(l.mountPath, filePath))
+}
+
+func (l LustreDatastore) Symlink(pointTo, filePath string) error {
+	return os.Symlink(pointTo, path.Join(l.mountPath, filePath))
+}
 
 func (l LustreDatastore) Remove(filePath string) error {
 	return os.Remove(path.Join(l.mountPath, filePath))

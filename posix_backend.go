@@ -35,6 +35,14 @@ func (l PosixDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
 	return os.Lstat(path.Join(l.mountPath, filePath))
 }
 
+func (l PosixDatastore) Readlink(filePath string) (string, error) {
+	return os.Readlink(path.Join(l.mountPath, filePath))
+}
+
+func (l PosixDatastore) Symlink(pointTo, filePath string) error {
+	return os.Symlink(pointTo, path.Join(l.mountPath, filePath))
+}
+
 func (l PosixDatastore) Remove(filePath string) error {
 	return os.Remove(path.Join(l.mountPath, filePath))
 }

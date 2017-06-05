@@ -30,7 +30,9 @@ type storage_backend interface {
 	GetId() string
 	GetSkipFilesNewer() int
 	GetSkipFilesOlder() int
-	GetMetadata(filepath string) (os.FileInfo, error)
+	GetMetadata(filePath string) (os.FileInfo, error)
+	Readlink(filePath string) (string, error)
+	Symlink(pointTo, filePath string) error
 	Remove(filePath string) error
 	Open(filePath string) (io.ReadCloser, error)
 	Create(filePath string) (io.WriteCloser, error)

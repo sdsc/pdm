@@ -152,12 +152,46 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			//log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
 		case mode.IsDir():
-			log.Error("File ", filepath, " appeared to be a folder")
 			// shouldn't happen
+			log.Error("File ", filepath, " appeared to be a folder")
 		case mode&os.ModeSymlink != 0:
-			// fmt.Println("symbolic link")
+			sourceMtime := sourceFileMeta.ModTime()
+			sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
+			sourceAtime := getAtime(sourceStat)
+			if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest link exists
+				destMtime := destFileMeta.ModTime()
+
+				if sourceFileMeta.Mode() == destFileMeta.Mode() &&
+					sourceMtime == destMtime {
+					atomic.AddUint64(&FilesSkippedCount, 1)
+					continue
+				}
+				log.Debugf("Removing symlink %s", filepath)
+				err = toDataStore.Remove(filepath)
+				if err != nil {
+					log.Error("Error removing symlink ", filepath, ": ", err)
+					continue
+				}
+			}
+
+			defer atomic.AddUint64(&FilesCopiedCount, 1)
+			linkTarget, err := fromDataStore.Readlink(filepath)
+			if err != nil {
+				log.Error("Error reading symlink ", filepath, ": ", err)
+				continue
+			}
+
+			err = toDataStore.Symlink(linkTarget, filepath)
+			if err != nil {
+				log.Error("Error seting symlink ", filepath, ": ", err)
+				continue
+			}
+
+			toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
+			toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
+
 		case mode&os.ModeNamedPipe != 0:
-			// fmt.Println("named pipe")
+			log.Error("File ", filepath, " is a named pipe. Not supported yet.")
 		}
 	}
 }
