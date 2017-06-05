@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/gob"
 	"bytes"
+	"encoding/gob"
 	"github.com/prometheus/client_golang/prometheus"
-	"sync"
 	"github.com/streadway/amqp"
+	"sync"
 )
 
 type monMessage struct {
