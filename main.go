@@ -460,6 +460,7 @@ func main() {
 		prometheus.MustRegister(FilesSkippedCounter)
 		prometheus.MustRegister(BytesCounter)
 		prometheus.MustRegister(FoldersCopiedCounter)
+		prometheus.MustRegister(QueueMessagesGauge)
 
 		go func() {
 			subscribeMon(redial(ctx, viper.GetString("rabbitmq.connect_string")), processMonitorStream(), prometheusTopic)

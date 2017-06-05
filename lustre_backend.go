@@ -137,6 +137,5 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		cmd.Wait()
 	}(outchan)
 
-
 	return outchan, nil
 }
