@@ -419,6 +419,10 @@ func main() {
 		}()
 
 	case copyCommand.FullCommand():
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			log.Level = logrus.DebugLevel
+		}
+
 		rabbitmqServer := ""
 
 		if os.Getenv("PDM_RABBITMQ") != "" {
@@ -455,6 +459,10 @@ func main() {
 		close(pub_chan)
 
 	case monitor.FullCommand():
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			log.Level = logrus.DebugLevel
+		}
+
 		readWorkerConfig()
 		prometheus.MustRegister(FilesCopiedCounter)
 		prometheus.MustRegister(FilesSkippedCounter)
