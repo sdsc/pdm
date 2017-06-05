@@ -71,7 +71,11 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 	for _, filepath := range taskStruct.ItemPath {
 		sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 		if err != nil {
-			log.Errorf("Error reading file %s metadata: %s", filepath, err)
+			if os.IsNotExist(err) { // the user already removed the source file
+				log.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
+			} else {
+				log.Errorf("Error reading file %s metadata: %s", filepath, err)
+			}
 			continue
 		}
 
@@ -148,6 +152,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 			//log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
 		case mode.IsDir():
+			log.Error("File ", filepath, " appeared to be a folder")
 			// shouldn't happen
 		case mode&os.ModeSymlink != 0:
 			// fmt.Println("symbolic link")
@@ -159,20 +164,22 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 func processFolder(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) error {
 	dirPath := taskStruct.ItemPath[0]
-	//log.Debug("Processing folder %s", dirPath)
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
 
 	if dirPath != "/" {
 		sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
 		if err != nil {
-			log.Errorf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
-			return err
+			if os.IsNotExist(err) { // the user already removed the source folder
+				log.Debugf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
+				return nil
+			} else {
+				log.Errorf("Error reading folder %s: %s", dirPath, err)
+				return err
+			}
 		}
 
 		if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
-			//log.Debug("Dest dir exists: %#v", destDirMeta)
-
 			sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
 			sourceDirUid := int(sourceDirStat.Uid)
 			sourceDirGid := int(sourceDirStat.Uid)
