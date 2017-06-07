@@ -1,5 +1,5 @@
 # pdm
 
-Start rabbitmq:
-docker run -d --hostname dimm --name rabbitmq -e RABBITMQ_DEFAULT_USER=name -e RABBITMQ_DEFAULT_PASS=pass -p 8080:15672 -p 5672:5672 rabbitmq:management
+Parallel data mover is a general tool for moving a huge collections of files between filesystems using distributed set of worker nodes with help of RabbitMQ messaging.
 
+This version is significantly improved lustre-data-mover (https://github.com/sdsc/lustre-data-mover) written in GO.
