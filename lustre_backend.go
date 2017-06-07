@@ -81,10 +81,12 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 	//log.Debugf("#goroutines: %d\n", runtime.NumGoroutine())
 	outchan := make(chan []string)
 
+	curDir := path.Join(l.mountPath, dirPath)
+
 	cmdName := "lfs"
-	cmdArgs := []string{"find", path.Join(l.mountPath, dirPath), "-maxdepth", "1", "!", "-type", "d"}
+	cmdArgs := []string{"find", curDir, "-maxdepth", "1", "!", "-type", "d"}
 	if !listFiles {
-		cmdArgs = []string{"find", path.Join(l.mountPath, dirPath), "-maxdepth", "1", "-type", "d"}
+		cmdArgs = []string{"find", curDir, "-maxdepth", "1", "-type", "d"}
 	}
 
 	//log.Debugf("Scanning %s, for files: %v", dirPath, listFiles)
@@ -107,13 +109,12 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		if !listFiles {
 			for scanner.Scan() {
 				folder := scanner.Text()
-				//log.Debugf("Found folder in %s: %s", dirPath, folder)
-				rel, err := filepath.Rel(l.mountPath, folder)
-				if err != nil {
-					log.Errorf("Error resolving folder %s: %v", folder, err)
-					continue
-				}
-				if rel != "." && rel != dirPath {
+				if folder != curDir {
+					rel, err := filepath.Rel(l.mountPath, folder)
+					if err != nil {
+						log.Errorf("Error resolving folder %s: %v", folder, err)
+						continue
+					}
 					sendList := []string{rel}
 					outchan <- sendList
 				}
@@ -122,7 +123,6 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 			var filesBuf []string
 			for scanner.Scan() {
 				if len(filesBuf) == FILE_CHUNKS {
-					//log.Debugf("Found %d files in %s", len(filesBuf), dirPath)
 					outchan <- filesBuf
 					filesBuf = nil
 				}
@@ -137,7 +137,6 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				filesBuf = append(filesBuf, rel)
 			}
 			if len(filesBuf) > 0 {
-				//log.Debugf("Found %d files in %s", len(filesBuf), dirPath)
 				outchan <- filesBuf
 			}
 		}
