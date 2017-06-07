@@ -78,7 +78,6 @@ func (l LustreDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Tim
 }
 
 func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string, error) {
-	//log.Debugf("#goroutines: %d\n", runtime.NumGoroutine())
 	outchan := make(chan []string)
 
 	curDir := path.Join(l.mountPath, dirPath)
@@ -89,7 +88,6 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		cmdArgs = []string{"find", curDir, "-maxdepth", "1", "-type", "d"}
 	}
 
-	//log.Debugf("Scanning %s, for files: %v", dirPath, listFiles)
 	cmd := exec.Command(cmdName, cmdArgs...)
 	cmdReader, err := cmd.StdoutPipe()
 	if err != nil {
@@ -115,8 +113,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 						log.Errorf("Error resolving folder %s: %v", folder, err)
 						continue
 					}
-					sendList := []string{rel}
-					outchan <- sendList
+					outchan <- []string{rel}
 				}
 			}
 		} else {

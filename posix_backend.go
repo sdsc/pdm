@@ -78,15 +78,18 @@ func (l PosixDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Time
 func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, error) {
 	outchan := make(chan []string)
 
+	curDir := path.Join(l.mountPath, dirPath)
+
 	cmdName := "find"
-	cmdArgs := []string{path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "!", "-type", "d"}
+	cmdArgs := []string{curDir, "-mindepth", "1", "-maxdepth", "1", "!", "-type", "d"}
 	if !listFiles {
-		cmdArgs = []string{path.Join(l.mountPath, dirPath), "-mindepth", "1", "-maxdepth", "1", "-type", "d"}
+		cmdArgs = []string{curDir, "-mindepth", "1", "-maxdepth", "1", "-type", "d"}
 	}
 
 	cmd := exec.Command(cmdName, cmdArgs...)
 	cmdReader, err := cmd.StdoutPipe()
 	if err != nil {
+		log.Errorf("Error running find: %v", err)
 		return nil, err
 	}
 
@@ -97,17 +100,19 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 		return nil, err
 	}
 
-	go func() {
+	go func(outchan chan []string) {
 		defer close(outchan)
 		if !listFiles {
 			for scanner.Scan() {
 				folder := scanner.Text()
-				rel, err := filepath.Rel(l.mountPath, folder)
-				if err != nil {
-					log.Printf("Error resolving folder %s: %v", folder, err)
-					continue
+				if folder != curDir {
+					rel, err := filepath.Rel(l.mountPath, folder)
+					if err != nil {
+						log.Errorf("Error resolving folder %s: %v", folder, err)
+						continue
+					}
+					outchan <- []string{rel}
 				}
-				outchan <- []string{rel}
 			}
 		} else {
 			var filesBuf []string
@@ -120,7 +125,7 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 				file := scanner.Text()
 				rel, err := filepath.Rel(l.mountPath, file)
 				if err != nil {
-					log.Printf("Error resolving file %s: %v", file, err)
+					log.Errorf("Error resolving file %s: %v", file, err)
 					continue
 				}
 
@@ -131,7 +136,7 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 			}
 		}
 		cmd.Wait()
-	}()
+	}(outchan)
 
 	return outchan, nil
 }
