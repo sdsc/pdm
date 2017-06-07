@@ -82,7 +82,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 
 	curDir := path.Join(l.mountPath, dirPath)
 
-	cmdName := "lfs"
+	cmdName := "/usr/bin/lfs"
 	cmdArgs := []string{"find", curDir, "-maxdepth", "1", "!", "-type", "d"}
 	if !listFiles {
 		cmdArgs = []string{"find", curDir, "-maxdepth", "1", "-type", "d"}
