@@ -332,14 +332,14 @@ var (
 	worker = app.Command("worker", "Run a worker")
 
 	copyCommand             = app.Command("copy", "Copy a folder or a file")
-	rabbitmqServerCopyParam = copyCommand.Flag("rabbitmq", "RabbitMQ connect string.").String()
+	rabbitmqServerCopyParam = copyCommand.Flag("rabbitmq", "RabbitMQ connect string. (Can also be set in PDM_RABBITMQ environmental variable)").String()
 	isFileCopyParam         = copyCommand.Flag("file", "Copy a file.").Bool()
 	sourceCopyParam         = copyCommand.Arg("source", "The source mount").Required().String()
 	targetCopyParam         = copyCommand.Arg("target", "The target mount").Required().String()
 	pathCopyParam           = copyCommand.Arg("path", "The path to copy").Required().String()
 
 	clearCommand             = app.Command("clear", "Clear a folder or a file on target according to source")
-	rabbitmqServerClearParam = clearCommand.Flag("rabbitmq", "RabbitMQ connect string.").String()
+	rabbitmqServerClearParam = clearCommand.Flag("rabbitmq", "RabbitMQ connect string.  (Can also be set in PDM_RABBITMQ environmental variable)").String()
 	isFileClearParam         = clearCommand.Flag("file", "Clear a file.").Bool()
 	sourceClearParam         = clearCommand.Arg("source", "The source mount").Required().String()
 	targetClearParam         = clearCommand.Arg("target", "The target mount").Required().String()
