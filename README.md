@@ -1,4 +1,4 @@
-# pdm
+## pdm
 
 Parallel data mover is a general tool for moving a huge collections of files between filesystems using distributed set of worker nodes with help of RabbitMQ messaging.
 
@@ -30,13 +30,13 @@ go build
 
 This will create pdm binary runnable in your OS. To create a binary for another OS use cross-compilation, f.e.: ```GOOS=linux GOARCH=amd64 go build``` would build a binary for 64-bit linux.
 
-#Configuring:
+# Configuring:
 
 To configure workers, copy config.toml.example file to either user's $HOME/.pdm or the folder where the script executes as config.toml and modify as needed.
 
 In command mode the tool only needs the RabbitMQ server connect string in either a PDM_RABBITMQ environmental variable or as a --rabbitmq parameter.
 
-#Running:
+# Running:
 
 Let's assume we have two filesystems defined in the config file: "panda" and "badger", mounted at /mnt/panda and /mnt/badger. We want to copy /mnt/panda/user_xyz folder to /mnt/badger. The badger filesystem should have "write" attribute set to true in the config file.
 
@@ -44,7 +44,7 @@ To start regular file copy workers on a node, edit the config file appropriately
 
 To send the initial copy command, set the RabbitMQ connect string for the client (see Configuring section) and run ```./pdm copy panda badger /user_xyz```. This will send initial RabbitMQ message to the queue and worker(s) will start copying the files.
 
-#Monitoring:
+# Monitoring:
 
 To monitor the progress, install a Prometheus service (https://prometheus.io/). Start a pdm montoring daemon by running ```./pdm monitor``` - this will start a prometheus target on port 8082. Direct your prometheus service to this target and you will get the statistics collected in prometheus instance.
 
