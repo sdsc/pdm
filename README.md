@@ -16,7 +16,7 @@ One copy pass can contain either of 3 actions:
 
 _(source: the filesystem with users' data; target: the filesystem where data is being migrated to)_
 
-#Building:
+# Building:
 
 Install Go environment.
 
