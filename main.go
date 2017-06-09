@@ -671,6 +671,7 @@ func main() {
 		readWorkerConfig()
 		prometheus.MustRegister(FilesCopiedCounter)
 		prometheus.MustRegister(FilesSkippedCounter)
+		prometheus.MustRegister(FilesIndexedCounter)
 		prometheus.MustRegister(BytesCounter)
 		prometheus.MustRegister(FoldersCopiedCounter)
 		prometheus.MustRegister(QueueMessagesGauge)
