@@ -30,6 +30,7 @@ type storage_backend interface {
 	GetId() string
 	GetSkipFilesNewer() int
 	GetSkipFilesOlder() int
+	GetLocalFilepath(filePath string) string
 	GetMetadata(filePath string) (os.FileInfo, error)
 	Readlink(filePath string) (string, error)
 	Symlink(pointTo, filePath string) error
@@ -84,15 +85,24 @@ var data_backends = make(map[string]storage_backend)
 
 var pubChan = make(chan message, 512)
 
+var elasticClient *elastic.Client
+
+var ctx, done = context.WithCancel(context.Background())
+
 type message struct {
 	Body       []byte
 	RoutingKey string
 }
 
 type task struct {
-	// One of: "copy", "clear"
+	// One of: "copy", "clear", "scan"
 	Action   string
 	ItemPath []string
+}
+
+type fileIdx struct {
+	Size int64 `json:"size"`
+	Type string `json:"type"`
 }
 
 type session struct {
@@ -298,6 +308,61 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 				}
 			}
 		}
+
+		for k := range viper.Get("datasource").(map[string]interface{}) {
+			routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s", k), fmt.Sprintf("dir.%s", k)
+
+			queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
+			if err != nil {
+				log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
+				return
+			}
+
+			if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
+				log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+				return
+			}
+
+			deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
+			if err != nil {
+				log.Errorf("cannot consume from: %q, %v", queueFile, err)
+				return
+			}
+
+			queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
+			if err != nil {
+				log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
+				return
+			}
+
+			if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
+				log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+				return
+			}
+
+			deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
+			if err != nil {
+				log.Errorf("cannot consume from: %q, %v", queueDir, err)
+				return
+			}
+
+			wg.Add(2)
+
+			go func() {
+				defer wg.Done()
+				for msg := range deliveriesFile {
+					file_messages <- msg
+				}
+			}()
+			go func() {
+				defer wg.Done()
+				for msg := range deliveriesDir {
+					folder_messages <- msg
+				}
+			}()
+		}
+
+
 		wg.Wait()
 	}
 }
@@ -306,24 +371,40 @@ func initElasticLog() {
 	hostname, err := os.Hostname()
 	if err != nil {
 		log.Error("Error getting hostname: ", err)
+	    return
 	}
 
-	client, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
+	elasticClient_, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
+	elasticClient = elasticClient_
 	if err != nil {
 		log.Panic(err)
+	    return
 	}
-	hook, err := elogrus.NewElasticHook(client, hostname, logrus.DebugLevel, "pdmlog")
+
+	hook, err := elogrus.NewElasticHook(elasticClient, hostname, logrus.DebugLevel, "pdmlog")
 	if err != nil {
 		log.Panic(err)
+	    return
 	}
 	log.Hooks.Add(hook)
 
 	log.Out = ioutil.Discard
 
-	// log.WithFields(logrus.Fields{
-	// 	"name": "joe",
-	// 	"age":  42,
-	// }).Error("Hello world!")
+
+	exists, err := elasticClient.IndexExists("idx").Do(ctx)
+	if err != nil {
+	    log.Error(err)
+	    return
+	}
+	if !exists {
+		_, err = elasticClient.CreateIndex("idx").Do(ctx)
+		if err != nil {
+		    // Handle error
+		    log.Error(err)
+		    return
+		}
+	}
+
 }
 
 var (
@@ -345,11 +426,16 @@ var (
 	targetClearParam         = clearCommand.Arg("target", "The target mount ID").Required().String()
 	pathClearParam           = clearCommand.Arg("path", "The path to clear, relative to the mount").Required().String()
 
+	scanCommand             = app.Command("scan", "Scan a folder or a file")
+	rabbitmqServerScanParam = scanCommand.Flag("rabbitmq", "RabbitMQ connect string.  (Can also be set in PDM_RABBITMQ environmental variable)").String()
+	isFileScanParam         = scanCommand.Flag("file", "Scan a file.").Bool()
+	fsScanParam         	= scanCommand.Arg("fs", "The fs mount ID").Required().String()
+	pathScanParam           = scanCommand.Arg("path", "The path to scan, relative to the mount").Required().String()
+
 	monitor = app.Command("monitor", "Start monitoring daemon")
 )
 
 func main() {
-	ctx, done := context.WithCancel(context.Background())
 	go func() {
 		http.ListenAndServe(":8080", nil)
 	}()
@@ -497,15 +583,51 @@ func main() {
 			"clear",
 			[]string{*pathClearParam}}
 
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		err := enc.Encode(msgTask)
+		taskEnc, err := encodeTask(msgTask)
 		if err != nil {
 			log.Error("Error encoding message: ", err)
 			return
 		}
 
-		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceClearParam + "." + *targetClearParam}
+		var msg = message{taskEnc, queuePrefix + "." + *sourceClearParam + "." + *targetClearParam}
+		pub_chan <- msg
+		close(pub_chan)
+
+	case scanCommand.FullCommand():
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			log.Level = logrus.DebugLevel
+		}
+
+		rabbitmqServer := ""
+
+		if os.Getenv("PDM_RABBITMQ") != "" {
+			rabbitmqServer = os.Getenv("PDM_RABBITMQ")
+		} else if *rabbitmqServerScanParam != "" {
+			rabbitmqServer = *rabbitmqServerScanParam
+		}
+
+		pub_chan := make(chan message)
+
+		go func() {
+			publish(redial(ctx, rabbitmqServer), pub_chan, done)
+		}()
+
+		queuePrefix := "dir"
+		if *isFileScanParam {
+			queuePrefix = "file"
+		}
+
+		msgTask := task{
+			"scan",
+			[]string{*pathScanParam}}
+
+		taskEnc, err := encodeTask(msgTask)
+		if err != nil {
+			log.Error("Error encoding message: ", err)
+			return
+		}
+
+		var msg = message{taskEnc, queuePrefix + "." + *fsScanParam}
 		pub_chan <- msg
 		close(pub_chan)
 

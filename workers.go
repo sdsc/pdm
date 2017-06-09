@@ -18,8 +18,12 @@ func processFilesStream() chan<- amqp.Delivery {
 	for i := 0; i < viper.GetInt("file_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
-				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
+				routingKeySplit := strings.Split(msg.RoutingKey, ".")
+				fromDataStore := data_backends[routingKeySplit[1]]
+				var toDataStore storage_backend
+				if len(routingKeySplit) > 2 {
+ 					toDataStore = data_backends[routingKeySplit[2]]
+				}
 
 				curTask, err := decodeTask(msg.Body)
 				if err != nil {
@@ -40,8 +44,12 @@ func processFoldersStream() chan<- amqp.Delivery {
 	for i := 0; i < viper.GetInt("dir_workers"); i++ {
 		go func(i int) {
 			for msg := range msgs {
-				var fromDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[1]]
-				var toDataStore = data_backends[strings.Split(msg.RoutingKey, ".")[2]]
+				routingKeySplit := strings.Split(msg.RoutingKey, ".")
+				fromDataStore := data_backends[routingKeySplit[1]]
+				var toDataStore storage_backend
+				if len(routingKeySplit) > 2 {
+ 					toDataStore = data_backends[routingKeySplit[2]]
+				}
 
 				curTask, err := decodeTask(msg.Body)
 				if err != nil {
@@ -204,6 +212,41 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				}
 			} // else the source file exists - do nothing
 		}
+	case "scan":
+		for _, filepath := range taskStruct.ItemPath {
+			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					log.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
+				} else {
+					log.Errorf("Error reading file %s metadata: %s", filepath, err)
+				}
+				continue
+			}
+
+			if sourceFileMeta.Mode().IsRegular() {
+				fileType, err := getFileType(fromDataStore.GetLocalFilepath(filepath))
+				if err != nil {
+					log.Errorf("Error recognising %s metadata: %s", filepath, err)
+					continue
+				}
+
+				// log.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
+				fileIndex := fileIdx{sourceFileMeta.Size(), fileType}
+				_, err = elasticClient.Index().
+				    Index("idx").
+				    Type("file").
+				    Id(filepath).
+				    BodyJson(fileIndex).
+				    Refresh("true").
+				    Do(ctx)
+				if err != nil {
+				    // Handle error
+				    log.Errorf("Error adding file %s to index: %s",filepath, err)
+				}
+			}
+
+		}
 	}
 }
 
@@ -347,6 +390,62 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			}
 
 			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			pubChan <- msg
+		}
+
+	case "scan":
+		if dirPath != "/" {
+			_, err := fromDataStore.GetMetadata(dirPath)
+			if err != nil {
+				if os.IsNotExist(err) { // the user already removed the source folder
+					log.Debugf("Source folder not exists: %s", dirPath, err)
+					return nil
+				} else {
+					log.Errorf("Error reading source folder %s: %s", dirPath, err)
+					return err
+				}
+			}
+		}
+
+		dirsChan, err := fromDataStore.ListDir(dirPath, false)
+		if err != nil {
+			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			return err
+		}
+
+		for dir := range dirsChan {
+			msgTask := task{
+				"scan",
+				dir}
+
+			taskEnc, err := encodeTask(msgTask)
+			if err != nil {
+				log.Error("Error encoding dir message: ", err)
+				continue
+			}
+
+			msg := message{taskEnc, "dir." + fromDataStore.GetId()}
+			pubChan <- msg
+		}
+
+		filesChan, err := fromDataStore.ListDir(dirPath, true)
+		if err != nil {
+			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			return err
+		}
+
+		for files := range filesChan {
+			msgTask := task{
+				"scan",
+				files}
+
+			taskEnc, err := encodeTask(msgTask)
+			if err != nil {
+				log.Error("Error encoding monitoring message: ", err)
+				continue
+			}
+
+			msg := message{taskEnc, "file." + fromDataStore.GetId()}
 			pubChan <- msg
 		}
 	}

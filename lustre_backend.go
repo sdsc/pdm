@@ -33,6 +33,10 @@ func (l LustreDatastore) GetSkipFilesOlder() int {
 	return l.skipFilesOlder
 }
 
+func (l LustreDatastore) GetLocalFilepath(filePath string) string {
+	return path.Join(l.mountPath, filePath)
+}
+
 func (l LustreDatastore) GetMetadata(filePath string) (os.FileInfo, error) {
 	return os.Lstat(path.Join(l.mountPath, filePath))
 }
