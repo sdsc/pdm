@@ -84,6 +84,23 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 						}
 					}
 				}
+				for k := range viper.Get("datasource").(map[string]interface{}) {
+					routingKey := fmt.Sprintf("%s", k)
+
+					inspectQueue, err := ch.QueueInspect("file." + routingKey)
+					if err != nil {
+						log.Errorf("Cannot create queue %s: %v", "file."+routingKey, err)
+						return
+					}
+					QueueMessagesGauge.WithLabelValues(routingKey, "file").Set(float64(inspectQueue.Messages))
+
+					inspectQueue, err = ch.QueueInspect("dir." + routingKey)
+					if err != nil {
+						log.Errorf("Cannot create queue %s: %v", "dir."+routingKey, err)
+						return
+					}
+					QueueMessagesGauge.WithLabelValues(routingKey, "dir").Set(float64(inspectQueue.Messages))
+				}
 			}
 		}()
 
