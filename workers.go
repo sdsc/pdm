@@ -125,8 +125,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					// TODO: setstripe
 				}
 
-				defer atomic.AddUint64(&FilesCopiedCount, 1)
-
 				//log.Debug("Started copying %s %d", filepath, worker)
 				src, err := fromDataStore.Open(filepath)
 				if err != nil {
@@ -147,11 +145,12 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				src.Close()
 				dest.Close()
 
-				atomic.AddUint64(&BytesCount, uint64(bytesCopied))
-
 				toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
 				toDataStore.Chmod(filepath, sourceFileMeta.Mode())
 				toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
+
+				atomic.AddUint64(&FilesCopiedCount, 1)
+				atomic.AddUint64(&BytesCount, uint64(bytesCopied))
 
 				//log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
 			case mode.IsDir():
@@ -177,7 +176,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					}
 				}
 
-				defer atomic.AddUint64(&FilesCopiedCount, 1)
 				linkTarget, err := fromDataStore.Readlink(filepath)
 				if err != nil {
 					log.Error("Error reading symlink ", filepath, ": ", err)
@@ -192,6 +190,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 				toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
 				toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
+
+				atomic.AddUint64(&FilesCopiedCount, 1)
 
 			case mode&os.ModeNamedPipe != 0:
 				log.Error("File ", filepath, " is a named pipe. Not supported yet.")
@@ -244,6 +244,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				    // Handle error
 				    log.Errorf("Error adding file %s to index: %s",filepath, err)
 				}
+			    atomic.AddUint64(&FilesIndexedCount, 1)
 			}
 
 		}

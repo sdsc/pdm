@@ -73,6 +73,7 @@ func readWorkerConfig() {
 var (
 	FilesCopiedCount   uint64 = 0
 	FilesSkippedCount  uint64 = 0
+	FilesIndexedCount  uint64 = 0
 	BytesCount         uint64 = 0
 	FoldersCopiedCount uint64 = 0
 )
@@ -516,6 +517,7 @@ func main() {
 			for range time.NewTicker(time.Duration(viper.GetInt("monitor_interval")) * time.Second).C {
 				curFilesCopiedCount := atomic.SwapUint64(&FilesCopiedCount, 0)
 				curFilesSkippedCount := atomic.SwapUint64(&FilesSkippedCount, 0)
+				curFilesIndexedCount := atomic.SwapUint64(&FilesIndexedCount, 0)
 				curBytesCount := atomic.SwapUint64(&BytesCount, 0)
 				curFoldersCopiedCount := atomic.SwapUint64(&FoldersCopiedCount, 0)
 				hostname, err := os.Hostname()
@@ -527,6 +529,7 @@ func main() {
 					hostname,
 					float64(curFilesCopiedCount),
 					float64(curFilesSkippedCount),
+					float64(curFilesIndexedCount),
 					float64(curBytesCount),
 					float64(curFoldersCopiedCount)}
 
