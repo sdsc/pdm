@@ -7,9 +7,11 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"sync"
 	"sync/atomic"
 	"time"
+	"syscall"
 
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
@@ -57,6 +59,8 @@ func readWorkerConfig() {
 
 	viper.SetDefault("dir_workers", 2)
 	viper.SetDefault("file_workers", 2)
+	viper.SetDefault("monitor_mount_sec", 2)
+	viper.SetDefault("elastic_index", "idx")
 
 	err := viper.ReadInConfig()
 	if err != nil {
@@ -391,13 +395,13 @@ func initElasticLog() {
 	log.Out = ioutil.Discard
 
 
-	exists, err := elasticClient.IndexExists("idx").Do(ctx)
+	exists, err := elasticClient.IndexExists(viper.GetString("elastic_index")).Do(ctx)
 	if err != nil {
 	    log.Error(err)
 	    return
 	}
 	if !exists {
-		_, err = elasticClient.CreateIndex("idx").Do(ctx)
+		_, err = elasticClient.CreateIndex(viper.GetString("elastic_index")).Do(ctx)
 		if err != nil {
 		    // Handle error
 		    log.Error(err)
@@ -452,13 +456,14 @@ func main() {
 			log.Level = logrus.DebugLevel
 		}
 
+		var checkMountpoints []string
+
 		for k := range viper.Get("datasource").(map[string]interface{}) {
 			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
 			case "lustre":
 				data_backends[k] = LustreDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
@@ -466,11 +471,35 @@ func main() {
 				data_backends[k] = PosixDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
 			}
+			if viper.IsSet(fmt.Sprintf("datasource.%s.mount", k)) && viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)) {
+				checkMountpoints = append(checkMountpoints, viper.GetString(fmt.Sprintf("datasource.%s.path", k)))
+			}
+		}
+
+		if len(checkMountpoints) > 0 {
+			go func() {
+				for range time.NewTicker(time.Duration(viper.GetInt("monitor_mount_sec")) * time.Second).C {
+					var stat1, stat2 syscall.Stat_t
+					for _, mountpoint := range checkMountpoints {
+						if err := syscall.Stat(mountpoint, &stat1); err != nil {
+						    log.Fatalf("Error checking mountpoint %s: %s", mountpoint, err)
+						}
+						if err := syscall.Stat(path.Dir(mountpoint), &stat2); err != nil {
+						    log.Fatalf("Error checking mountpoint %s: %s", path.Dir(mountpoint), err)
+						}
+						if stat1.Dev == stat2.Dev {
+						    log.Fatalf("Filesystem %s is not mounted. Exiting", mountpoint)
+						    done()
+						} else {
+							log.Debugf("stat1.Dev == stat2.Dev: %s == %s", stat1.Dev, stat2.Dev)
+						}
+					}
+				}
+			}()
 		}
 
 		go func() {

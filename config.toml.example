@@ -4,6 +4,15 @@ file_workers = 5
 elastic_url = "http://localhost:9200"
 debug = true
 
+# If you want to recognize the filetypes and index those in elasticsearch, provide a path to the apache tika jar file.
+# tika_jar = "/usr/local/Cellar/tika/1.14/libexec/tika-app-1.14.jar"
+
+# How often to check the mountpoints
+# monitor_mount_sec = 2
+
+# Elasticsearch files index name
+# elastic_index = idx
+
 [rabbitmq]
 connect_string = "amqp://guest:guest@localhost:5672/"
 
@@ -18,9 +27,20 @@ skip_files_newer_minutes=60
 skip_files_older_minutes=0
 
 [datasource.panda]
+# plugin to use (lustre/posix)
 type = "lustre"
+
+# mount path
 path = "/mnt/panda"
+
+# check if filesystem is mounted
 mount = true
+
+# allow modifying the filesystem
 write = false
+
+# skip files newer than N seconds (off if 0)
 skip_files_newer_minutes=0
+
+# skip files older than N seconds (off if 0)
 skip_files_older_minutes=0

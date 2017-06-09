@@ -13,7 +13,6 @@ import (
 type PosixDatastore struct {
 	id             string
 	mountPath      string
-	shouldMount    bool
 	canWrite       bool
 	skipFilesNewer int
 	skipFilesOlder int

@@ -234,7 +234,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				// log.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
 				fileIndex := fileIdx{sourceFileMeta.Size(), fileType}
 				_, err = elasticClient.Index().
-				    Index("idx").
+				    Index(viper.GetString("elastic_index")).
 				    Type("file").
 				    Id(filepath).
 				    BodyJson(fileIndex).
