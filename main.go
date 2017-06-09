@@ -495,8 +495,6 @@ func main() {
 						if stat1.Dev == stat2.Dev {
 						    log.Fatalf("Filesystem %s is not mounted. Exiting", mountpoint)
 						    done()
-						} else {
-							log.Debugf("stat1.Dev == stat2.Dev: %s == %s", stat1.Dev, stat2.Dev)
 						}
 					}
 				}
