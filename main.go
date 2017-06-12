@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/signal"
 	"path"
 	"sync"
 	"sync/atomic"
@@ -458,6 +459,15 @@ func main() {
 		}
 
 		var checkMountpoints []string
+
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		go func(){
+		    for sig := range c {
+		        log.Debugf("Got interrupt signal! %v", sig)
+		        done()
+		    }
+		}()
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
 			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
