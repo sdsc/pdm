@@ -33,6 +33,11 @@ func processFilesStream() chan<- amqp.Delivery {
 
 				processFiles(fromDataStore, toDataStore, curTask)
 				msg.Acknowledger.Ack(msg.DeliveryTag, false)
+				select {
+				case <-ctx.Done():
+					log.Debug("Shutting down files processor")
+					return
+				}
 			}
 		}(i)
 	}
@@ -62,6 +67,11 @@ func processFoldersStream() chan<- amqp.Delivery {
 					msg.Acknowledger.Nack(msg.DeliveryTag, false, true)
 				} else {
 					msg.Acknowledger.Ack(msg.DeliveryTag, false)
+				}
+				select {
+				case <-ctx.Done():
+					log.Debug("Shutting down folders processor")
+					return
 				}
 			}
 		}(i)

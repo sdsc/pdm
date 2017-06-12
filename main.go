@@ -22,7 +22,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
-	_ "net/http/pprof"
 
 	"github.com/Sirupsen/logrus"
 	"gopkg.in/olivere/elastic.v5"
@@ -223,6 +222,13 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 				pending <- msg
 				reading = nil
 			}
+
+			select {
+			case <-ctx.Done():
+				log.Debug("Shutting down files processor")
+				return
+			}
+
 		}
 	}
 }
@@ -442,9 +448,6 @@ var (
 )
 
 func main() {
-	go func() {
-		http.ListenAndServe(":8080", nil)
-	}()
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case worker.FullCommand():
@@ -511,13 +514,17 @@ func main() {
 			}()
 		}
 
+		var workersWg sync.WaitGroup
+
 		go func() {
+			workersWg.Add(1)
 			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), pubChan, nil)
+			workersWg.Done()
 			done()
 		}()
 
 		go func() {
-			subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(), processFoldersStream())
+			subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(workersWg), processFoldersStream(workersWg))
 			done()
 		}()
 
@@ -554,6 +561,9 @@ func main() {
 
 			}
 		}()
+		log.Debug("Waiting for workers waitgroup")
+		workersWg.Wait()
+		log.Debug("Waiting for workers waitgroup is done")
 
 	case copyCommand.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {
@@ -694,6 +704,7 @@ func main() {
 
 	}
 
+	log.Debug("Looks like we're done with the workers")
 	<-ctx.Done()
-
+	log.Debug("Looks like we're done")
 }
