@@ -44,6 +44,8 @@ To start regular file copy workers on a node, edit the config file appropriately
 
 To send the initial copy command, set the RabbitMQ connect string for the client (see Configuring section) and run ```./pdm copy panda badger /user_xyz```. This will send initial RabbitMQ message to the queue and worker(s) will start copying the files.
 
+To gracefully shutdown a worker, send it the SIGHUP signal and wait for all processes to finish. (f.e. ```pkill -HUP -f worker```)
+
 # Monitoring:
 
 To monitor the progress, install a Prometheus service (https://prometheus.io/). Start a pdm montoring daemon by running ```./pdm monitor``` - this will start a prometheus target on port 8082. Direct your prometheus service to this target and you will get the statistics collected in prometheus instance.
