@@ -222,13 +222,6 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 				pending <- msg
 				reading = nil
 			}
-
-			select {
-			case <-ctx.Done():
-				log.Debug("Shutting down files processor")
-				return
-			}
-
 		}
 	}
 }
