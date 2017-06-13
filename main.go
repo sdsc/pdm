@@ -403,13 +403,13 @@ func initElasticLog() {
 	log.Out = ioutil.Discard
 
 
-	exists, err := elasticClient.IndexExists(viper.GetString("elastic_index")).Do(ctx)
+	exists, err := elasticClient.IndexExists(viper.GetString("elastic_index")).Do(context.Background())
 	if err != nil {
 	    log.Error(err)
 	    return
 	}
 	if !exists {
-		_, err = elasticClient.CreateIndex(viper.GetString("elastic_index")).Do(ctx)
+		_, err = elasticClient.CreateIndex(viper.GetString("elastic_index")).Do(context.Background())
 		if err != nil {
 		    // Handle error
 		    log.Error(err)
@@ -464,10 +464,10 @@ func main() {
 		var checkMountpoints []string
 
 		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt)
+		signal.Notify(c, syscall.SIGHUP)
 		go func(){
 		    for sig := range c {
-		        log.Debugf("Got interrupt signal! %v", sig)
+		        fmt.Printf("Got %v signal. Terminating gracefully.\n", sig)
 		        done()
 		    }
 		}()
@@ -524,7 +524,7 @@ func main() {
 		}()
 
 		go func() {
-			subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(workersWg), processFoldersStream(workersWg))
+			subscribe(redial(ctx, viper.GetString("rabbitmq.connect_string")), processFilesStream(&workersWg), processFoldersStream(&workersWg))
 			done()
 		}()
 
@@ -561,9 +561,7 @@ func main() {
 
 			}
 		}()
-		log.Debug("Waiting for workers waitgroup")
 		workersWg.Wait()
-		log.Debug("Waiting for workers waitgroup is done")
 
 	case copyCommand.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {
@@ -704,7 +702,5 @@ func main() {
 
 	}
 
-	log.Debug("Looks like we're done with the workers")
 	<-ctx.Done()
-	log.Debug("Looks like we're done")
 }

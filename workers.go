@@ -6,17 +6,21 @@ import (
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
+	"golang.org/x/net/context"
 	"os"
 	"strings"
 	"sync/atomic"
+	"sync"
 	"syscall"
 	"time"
 )
 
-func processFilesStream() chan<- amqp.Delivery {
+func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 	msgs := make(chan amqp.Delivery)
 	for i := 0; i < viper.GetInt("file_workers"); i++ {
 		go func(i int) {
+			wg.Add(1)
+			defer wg.Done()
 			for msg := range msgs {
 				routingKeySplit := strings.Split(msg.RoutingKey, ".")
 				fromDataStore := data_backends[routingKeySplit[1]]
@@ -35,8 +39,8 @@ func processFilesStream() chan<- amqp.Delivery {
 				msg.Acknowledger.Ack(msg.DeliveryTag, false)
 				select {
 				case <-ctx.Done():
-					log.Debug("Shutting down files processor")
 					return
+				default:
 				}
 			}
 		}(i)
@@ -44,10 +48,12 @@ func processFilesStream() chan<- amqp.Delivery {
 	return msgs
 }
 
-func processFoldersStream() chan<- amqp.Delivery {
+func processFoldersStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 	msgs := make(chan amqp.Delivery)
 	for i := 0; i < viper.GetInt("dir_workers"); i++ {
 		go func(i int) {
+			wg.Add(1)
+			defer wg.Done()
 			for msg := range msgs {
 				routingKeySplit := strings.Split(msg.RoutingKey, ".")
 				fromDataStore := data_backends[routingKeySplit[1]]
@@ -70,8 +76,8 @@ func processFoldersStream() chan<- amqp.Delivery {
 				}
 				select {
 				case <-ctx.Done():
-					log.Debug("Shutting down folders processor")
 					return
+				default:
 				}
 			}
 		}(i)
@@ -249,7 +255,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				    Id(filepath).
 				    BodyJson(fileIndex).
 				    Refresh("true").
-				    Do(ctx)
+				    Do(context.Background())
 				if err != nil {
 				    // Handle error
 				    log.Errorf("Error adding file %s to index: %s",filepath, err)
