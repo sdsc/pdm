@@ -140,6 +140,7 @@ func redial(ctx context.Context, url string) chan chan session {
 			if err != nil {
 				log.Fatalf("cannot (re)dial: %v: %q", err, url)
 			}
+			log.Debug("redialled!")
 
 			select {
 			case sess <- session{conn}:
@@ -154,14 +155,15 @@ func redial(ctx context.Context, url string) chan chan session {
 }
 
 func publish(sessions chan chan session, messages <-chan message, cancel context.CancelFunc) {
-	var (
-		running bool
-		reading = messages
-		pending = make(chan message, 1)
-		confirm = make(chan amqp.Confirmation, 1)
-	)
 
 	for session := range sessions {
+		var (
+			running bool
+			reading = messages
+			pending = make(chan message, 1)
+			confirm = make(chan amqp.Confirmation, 1)
+		)
+
 		pub := <-session
 
 		ch, err := pub.Channel()
@@ -191,7 +193,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 			select {
 			case confirmed := <-confirm:
 				if !confirmed.Ack {
-					log.Debug("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
+					log.Debugf("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
 				}
 				reading = messages
 

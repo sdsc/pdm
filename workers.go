@@ -127,11 +127,11 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					if sourceFileMeta.Size() == destFileMeta.Size() &&
 						sourceFileMeta.Mode() == destFileMeta.Mode() &&
 						sourceMtime == destMtime {
-						log.Debug("File %s hasn't been changed ", filepath)
+						//log.Debug("File %s hasn't been changed ", filepath)
 						atomic.AddUint64(&FilesSkippedCount, 1)
 						continue
 					}
-					log.Debugf("File %s exists and is modified ", filepath)
+					//log.Debugf("File %s exists and is modified ", filepath)
 					err = toDataStore.Remove(filepath)
 					if err != nil {
 						log.Error("Error removing file ", filepath, ": ", err)
@@ -184,7 +184,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 						atomic.AddUint64(&FilesSkippedCount, 1)
 						continue
 					}
-					log.Debugf("Removing symlink %s", filepath)
+					//log.Debugf("Removing symlink %s", filepath)
 					err = toDataStore.Remove(filepath)
 					if err != nil {
 						log.Error("Error removing symlink ", filepath, ": ", err)
