@@ -140,7 +140,6 @@ func redial(ctx context.Context, url string) chan chan session {
 			if err != nil {
 				log.Fatalf("cannot (re)dial: %v: %q", err, url)
 			}
-			log.Debug("redialled!")
 
 			select {
 			case sess <- session{conn}:
@@ -157,6 +156,7 @@ func redial(ctx context.Context, url string) chan chan session {
 func publish(sessions chan chan session, messages <-chan message, cancel context.CancelFunc) {
 
 	for session := range sessions {
+		log.Info("redial publish")
 		var (
 			running bool
 			reading = messages
@@ -191,7 +191,10 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 		for {
 			var msg message
 			select {
-			case confirmed := <-confirm:
+			case confirmed, ok := <-confirm:
+				if !ok {
+					break Publish
+				}
 				if !confirmed.Ack {
 					log.Debugf("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
 				}
@@ -204,6 +207,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 				}
 				err := ch.Publish(curExchange, msg.RoutingKey, false, false, amqp.Publishing{
 					Body: msg.Body,
+					DeliveryMode:    amqp.Persistent,
 				})
 				// Retry failed delivery on the next session
 				if err != nil {
@@ -231,6 +235,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, folder_messages chan<- amqp.Delivery) {
 
 	for session := range sessions {
+		log.Info("redial subscribe")
 		sub := <-session
 
 		filech, err := sub.Channel()
@@ -239,7 +244,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 			continue
 		}
 
-		err = filech.Qos(36, 0, false)
+		err = filech.Qos(8, 0, false)
 		if err != nil {
 			log.Fatalf("cannot set channel QoS: %v", err)
 		}
@@ -296,6 +301,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 							log.Errorf("cannot consume from: %q, %v", queueDir, err)
 							return
 						}
+
 
 						wg.Add(2)
 
@@ -368,7 +374,6 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 				}
 			}()
 		}
-
 
 		wg.Wait()
 	}
