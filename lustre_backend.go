@@ -12,6 +12,10 @@ import (
 	"path/filepath"
 )
 
+const LustreNoStripeSize =   10*1000000000
+const Lustre5StripeSize =   100*1000000000
+const Lustre10StripeSize = 1000*1000000000
+
 type LustreDatastore struct {
 	id             string
 	mountPath      string
@@ -60,7 +64,28 @@ func (l LustreDatastore) Open(filePath string) (io.ReadCloser, error) {
 	return os.Open(path.Join(l.mountPath, filePath))
 }
 
-func (l LustreDatastore) Create(filePath string) (io.WriteCloser, error) {
+func (l LustreDatastore) Create(filePath string, meta os.FileInfo) (io.WriteCloser, error) {
+	if meta.Size() > LustreNoStripeSize {
+		cmdName := "/usr/bin/lfs"
+		var cmdArgs []string
+		if meta.Size() < Lustre5StripeSize {
+			cmdArgs = []string{"setstripe", "-c", "5", path.Join(l.mountPath, filePath)}
+			log.Debugf("Striping %s across 5", filePath)
+		} else if meta.Size() < Lustre10StripeSize {
+			cmdArgs = []string{"setstripe", "-c", "10", path.Join(l.mountPath, filePath)}
+			log.Debugf("Striping %s across 10", filePath)
+		} else {
+			cmdArgs = []string{"setstripe", "-c", "50", path.Join(l.mountPath, filePath)}
+			log.Debugf("Striping %s across 50", filePath)
+		}
+
+		_, err := exec.Command(cmdName, cmdArgs...).Output()
+		if err != nil {
+			log.Errorf("Error creating striped file: %v", err)
+			return nil, err
+		}
+		return os.OpenFile(path.Join(l.mountPath, filePath), os.O_RDWR|os.O_TRUNC, 0666)
+	}
 	return os.Create(path.Join(l.mountPath, filePath))
 }
 
@@ -145,3 +170,4 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 
 	return outchan, nil
 }
+

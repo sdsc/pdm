@@ -58,7 +58,7 @@ func (l PosixDatastore) Open(filePath string) (io.ReadCloser, error) {
 	return os.Open(path.Join(l.mountPath, filePath))
 }
 
-func (l PosixDatastore) Create(filePath string) (io.WriteCloser, error) {
+func (l PosixDatastore) Create(filePath string, meta os.FileInfo) (io.WriteCloser, error) {
 	return os.Create(path.Join(l.mountPath, filePath))
 }
 

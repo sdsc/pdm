@@ -39,7 +39,7 @@ type storage_backend interface {
 	Remove(filePath string) error
 	RemoveAll(filePath string) error
 	Open(filePath string) (io.ReadCloser, error)
-	Create(filePath string) (io.WriteCloser, error)
+	Create(filePath string, meta os.FileInfo) (io.WriteCloser, error)
 	Lchown(filePath string, uid, gid int) error
 	Chmod(filePath string, perm os.FileMode) error
 	Mkdir(dirPath string, perm os.FileMode) error

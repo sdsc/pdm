@@ -90,6 +90,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 	case "copy":
 
 		for _, filepath := range taskStruct.ItemPath {
+			//log.Debugf("Processing %s", filepath)
 			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source file
@@ -147,7 +148,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					log.Error("Error opening src file ", filepath, ": ", err)
 					continue
 				}
-				dest, err := toDataStore.Create(filepath)
+				dest, err := toDataStore.Create(filepath, sourceFileMeta)
 				if err != nil {
 					log.Error("Error opening dst file ", filepath, ": ", err)
 					continue
