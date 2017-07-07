@@ -15,6 +15,7 @@ type monMessage struct {
 	DataSource       string
 	Node             string
 	FilesCopied      float64
+	FilesRemoved     float64
 	FilesSkipped     float64
 	FilesIndexed     float64
 	BytesTransferred float64
@@ -25,6 +26,11 @@ var (
 	FilesCopiedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "files_copied_number",
 		Help: "Number of files copied",
+	},
+		[]string{"node", "datasource"})
+	FilesRemovedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "files_removed_number",
+		Help: "Number of files removed",
 	},
 		[]string{"node", "datasource"})
 	FilesSkippedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -163,6 +169,9 @@ func processMonitorStream() chan<- amqp.Delivery {
 			}
 			if curMonMessage.FilesCopied > 0 {
 				FilesCopiedCounter.WithLabelValues(curMonMessage.Node, curMonMessage.DataSource).Add(curMonMessage.FilesCopied)
+			}
+			if curMonMessage.FilesRemoved > 0 {
+				FilesRemovedCounter.WithLabelValues(curMonMessage.Node, curMonMessage.DataSource).Add(curMonMessage.FilesRemoved)
 			}
 			if curMonMessage.FilesSkipped > 0 {
 				FilesSkippedCounter.WithLabelValues(curMonMessage.Node, curMonMessage.DataSource).Add(curMonMessage.FilesSkipped)

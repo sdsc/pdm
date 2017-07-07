@@ -9,8 +9,8 @@ import (
 	"golang.org/x/net/context"
 	"os"
 	"strings"
-	"sync/atomic"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -26,7 +26,7 @@ func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 				fromDataStore := data_backends[routingKeySplit[1]]
 				var toDataStore storage_backend
 				if len(routingKeySplit) > 2 {
- 					toDataStore = data_backends[routingKeySplit[2]]
+					toDataStore = data_backends[routingKeySplit[2]]
 				}
 
 				curTask, err := decodeTask(msg.Body)
@@ -59,7 +59,7 @@ func processFoldersStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 				fromDataStore := data_backends[routingKeySplit[1]]
 				var toDataStore storage_backend
 				if len(routingKeySplit) > 2 {
- 					toDataStore = data_backends[routingKeySplit[2]]
+					toDataStore = data_backends[routingKeySplit[2]]
 				}
 
 				curTask, err := decodeTask(msg.Body)
@@ -221,13 +221,16 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				if os.IsNotExist(err) {
 					log.Debugf("Error reading file %s metadata, not exists, removing from target: %s", filepath, err)
 					err = toDataStore.Remove(filepath)
+					atomic.AddUint64(&FilesCopiedCount, 1)
 					if err != nil {
 						log.Error("Error clearing target file ", filepath, ": ", err)
 					}
 				} else {
 					log.Errorf("Error reading file %s metadata: %s", filepath, err)
 				}
-			} // else the source file exists - do nothing
+			} else { // else the source file exists
+				atomic.AddUint64(&FilesSkippedCount, 1)
+			}
 		}
 	case "scan":
 		for _, filepath := range taskStruct.ItemPath {
@@ -251,17 +254,17 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				// log.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
 				fileIndex := fileIdx{sourceFileMeta.Size(), fileType}
 				_, err = elasticClient.Index().
-				    Index(viper.GetString("elastic_index")).
-				    Type("file").
-				    Id(filepath).
-				    BodyJson(fileIndex).
-				    Refresh("true").
-				    Do(context.Background())
+					Index(viper.GetString("elastic_index")).
+					Type("file").
+					Id(filepath).
+					BodyJson(fileIndex).
+					Refresh("true").
+					Do(context.Background())
 				if err != nil {
-				    // Handle error
-				    log.Errorf("Error adding file %s to index: %s",filepath, err)
+					// Handle error
+					log.Errorf("Error adding file %s to index: %s", filepath, err)
 				}
-			    atomic.AddUint64(&FilesIndexedCount, 1)
+				atomic.AddUint64(&FilesIndexedCount, 1)
 			}
 
 		}

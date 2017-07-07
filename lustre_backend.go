@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 )
 
-const LustreNoStripeSize =   10*1000000000
-const Lustre5StripeSize =   100*1000000000
-const Lustre10StripeSize = 1000*1000000000
+const LustreNoStripeSize = 10 * 1000000000
+const Lustre5StripeSize = 100 * 1000000000
+const Lustre10StripeSize = 1000 * 1000000000
 
 type LustreDatastore struct {
 	id             string
@@ -170,4 +170,3 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 
 	return outchan, nil
 }
-

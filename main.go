@@ -11,8 +11,8 @@ import (
 	"path"
 	"sync"
 	"sync/atomic"
-	"time"
 	"syscall"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
@@ -72,6 +72,7 @@ func readWorkerConfig() {
 // these via rabbitmq to the aggregator
 var (
 	FilesCopiedCount   uint64 = 0
+	FilesRemovedCount  uint64 = 0
 	FilesSkippedCount  uint64 = 0
 	FilesIndexedCount  uint64 = 0
 	BytesCount         uint64 = 0
@@ -106,7 +107,7 @@ type task struct {
 }
 
 type fileIdx struct {
-	Size int64 `json:"size"`
+	Size int64  `json:"size"`
 	Type string `json:"type"`
 }
 
@@ -206,8 +207,8 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 					curExchange = "amq.topic"
 				}
 				err := ch.Publish(curExchange, msg.RoutingKey, false, false, amqp.Publishing{
-					Body: msg.Body,
-					DeliveryMode:    amqp.Persistent,
+					Body:         msg.Body,
+					DeliveryMode: amqp.Persistent,
 				})
 				// Retry failed delivery on the next session
 				if err != nil {
@@ -302,7 +303,6 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 							return
 						}
 
-
 						wg.Add(2)
 
 						go func() {
@@ -383,37 +383,36 @@ func initElasticLog() {
 	hostname, err := os.Hostname()
 	if err != nil {
 		log.Error("Error getting hostname: ", err)
-	    return
+		return
 	}
 
 	elasticClient_, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
 	elasticClient = elasticClient_
 	if err != nil {
 		log.Panic(err)
-	    return
+		return
 	}
 
 	hook, err := elogrus.NewElasticHook(elasticClient, hostname, logrus.DebugLevel, "pdmlog")
 	if err != nil {
 		log.Panic(err)
-	    return
+		return
 	}
 	log.Hooks.Add(hook)
 
 	log.Out = ioutil.Discard
 
-
 	exists, err := elasticClient.IndexExists(viper.GetString("elastic_index")).Do(context.Background())
 	if err != nil {
-	    log.Error(err)
-	    return
+		log.Error(err)
+		return
 	}
 	if !exists {
 		_, err = elasticClient.CreateIndex(viper.GetString("elastic_index")).Do(context.Background())
 		if err != nil {
-		    // Handle error
-		    log.Error(err)
-		    return
+			// Handle error
+			log.Error(err)
+			return
 		}
 	}
 
@@ -441,7 +440,7 @@ var (
 	scanCommand             = app.Command("scan", "Scan a folder or a file")
 	rabbitmqServerScanParam = scanCommand.Flag("rabbitmq", "RabbitMQ connect string.  (Can also be set in PDM_RABBITMQ environmental variable)").String()
 	isFileScanParam         = scanCommand.Flag("file", "Scan a file.").Bool()
-	fsScanParam         	= scanCommand.Arg("fs", "The fs mount ID").Required().String()
+	fsScanParam             = scanCommand.Arg("fs", "The fs mount ID").Required().String()
 	pathScanParam           = scanCommand.Arg("path", "The path to scan, relative to the mount").Required().String()
 
 	monitor = app.Command("monitor", "Start monitoring daemon")
@@ -465,11 +464,11 @@ func main() {
 
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGHUP)
-		go func(){
-		    for sig := range c {
-		        fmt.Printf("Got %v signal. Terminating gracefully.\n", sig)
-		        done()
-		    }
+		go func() {
+			for sig := range c {
+				fmt.Printf("Got %v signal. Terminating gracefully.\n", sig)
+				done()
+			}
 		}()
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
@@ -500,14 +499,14 @@ func main() {
 					var stat1, stat2 syscall.Stat_t
 					for _, mountpoint := range checkMountpoints {
 						if err := syscall.Stat(mountpoint, &stat1); err != nil {
-						    log.Fatalf("Error checking mountpoint %s: %s", mountpoint, err)
+							log.Fatalf("Error checking mountpoint %s: %s", mountpoint, err)
 						}
 						if err := syscall.Stat(path.Dir(mountpoint), &stat2); err != nil {
-						    log.Fatalf("Error checking mountpoint %s: %s", path.Dir(mountpoint), err)
+							log.Fatalf("Error checking mountpoint %s: %s", path.Dir(mountpoint), err)
 						}
 						if stat1.Dev == stat2.Dev {
-						    log.Fatalf("Filesystem %s is not mounted. Exiting", mountpoint)
-						    done()
+							log.Fatalf("Filesystem %s is not mounted. Exiting", mountpoint)
+							done()
 						}
 					}
 				}
@@ -531,6 +530,7 @@ func main() {
 		go func() {
 			for range time.NewTicker(time.Duration(viper.GetInt("monitor_interval")) * time.Second).C {
 				curFilesCopiedCount := atomic.SwapUint64(&FilesCopiedCount, 0)
+				curFilesRemovedCount := atomic.SwapUint64(&FilesRemovedCount, 0)
 				curFilesSkippedCount := atomic.SwapUint64(&FilesSkippedCount, 0)
 				curFilesIndexedCount := atomic.SwapUint64(&FilesIndexedCount, 0)
 				curBytesCount := atomic.SwapUint64(&BytesCount, 0)
@@ -543,6 +543,7 @@ func main() {
 					"none",
 					hostname,
 					float64(curFilesCopiedCount),
+					float64(curFilesRemovedCount),
 					float64(curFilesSkippedCount),
 					float64(curFilesIndexedCount),
 					float64(curBytesCount),
@@ -686,6 +687,7 @@ func main() {
 
 		readWorkerConfig()
 		prometheus.MustRegister(FilesCopiedCounter)
+		prometheus.MustRegister(FilesRemovedCounter)
 		prometheus.MustRegister(FilesSkippedCounter)
 		prometheus.MustRegister(FilesIndexedCounter)
 		prometheus.MustRegister(BytesCounter)
