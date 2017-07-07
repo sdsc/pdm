@@ -362,7 +362,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			_, err := fromDataStore.GetMetadata(dirPath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source folder
-					log.Debugf("Source folder not exists: %s", dirPath, err)
+					// log.Debugf("Source folder not exists: %s", dirPath, err)
 					toDataStore.RemoveAll(dirPath)
 					return nil
 				} else {
