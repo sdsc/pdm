@@ -221,7 +221,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				if os.IsNotExist(err) {
 					log.Debugf("Error reading file %s metadata, not exists, removing from target: %s", filepath, err)
 					err = toDataStore.Remove(filepath)
-					atomic.AddUint64(&FilesCopiedCount, 1)
+					atomic.AddUint64(&FilesRemovedCount, 1)
 					if err != nil {
 						log.Error("Error clearing target file ", filepath, ": ", err)
 					}
