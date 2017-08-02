@@ -276,6 +276,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
 
+	log.Debugf("Processing folder %s", dirPath)
 	switch taskStruct.Action {
 	case "copy":
 
@@ -361,14 +362,8 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		if dirPath != "/" {
 			_, err := fromDataStore.GetMetadata(dirPath)
 			if err != nil {
-				if os.IsNotExist(err) { // the user already removed the source folder
-					// log.Debugf("Source folder not exists: %s", dirPath, err)
-					toDataStore.RemoveAll(dirPath)
-					return nil
-				} else {
-					log.Errorf("Error reading source folder %s: %s", dirPath, err)
-					return err
-				}
+				toDataStore.RemoveAll(dirPath)
+				return nil
 			}
 		}
 
