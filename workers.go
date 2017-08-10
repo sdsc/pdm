@@ -234,6 +234,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		}
 	case "scan":
 		for _, filepath := range taskStruct.ItemPath {
+			log.Debugf("Scanning %s", filepath)
 			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -251,8 +252,11 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					continue
 				}
 
+				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
+				sourceAtime := getAtime(sourceStat)
+
 				// log.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
-				fileIndex := fileIdx{sourceFileMeta.Size(), fileType}
+				fileIndex := fileIdx{sourceFileMeta.Size(), fileType, sourceFileMeta.ModTime(), sourceAtime}
 				_, err = elasticClient.Index().
 					Index(viper.GetString("elastic_index")).
 					Type("file").

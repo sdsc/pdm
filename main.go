@@ -107,8 +107,10 @@ type task struct {
 }
 
 type fileIdx struct {
-	Size int64  `json:"size"`
-	Type string `json:"type"`
+	Size  int64     `json:"size"`
+	Type  string    `json:"type"`
+	Mtime time.Time `json:"mtime,omitempty"`
+	Atime time.Time `json:"atime,omitempty"`
 }
 
 type session struct {
@@ -402,19 +404,21 @@ func initElasticLog() {
 
 	log.Out = ioutil.Discard
 
+	log.Debug("Initing the elastic log")
 	exists, err := elasticClient.IndexExists(viper.GetString("elastic_index")).Do(context.Background())
 	if err != nil {
 		log.Error(err)
 		return
 	}
 	if !exists {
-		_, err = elasticClient.CreateIndex(viper.GetString("elastic_index")).Do(context.Background())
+		_, err = elasticClient.CreateIndex(viper.GetString("elastic_index")).BodyString(mapping).Do(context.Background())
 		if err != nil {
 			// Handle error
 			log.Error(err)
 			return
 		}
 	}
+	log.Debug("Initing the elastic log done")
 
 }
 
