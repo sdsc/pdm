@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 	//"runtime"
 	//"github.com/intel-hpdd/go-lustre/llapi"
@@ -57,7 +58,99 @@ func (l LustreDatastore) Remove(filePath string) error {
 }
 
 func (l LustreDatastore) RemoveAll(filePath string) error {
-	return os.RemoveAll(path.Join(l.mountPath, filePath))
+	return rmDir(path.Join(l.mountPath, filePath))
+}
+
+func rmDir(absPath string) error {
+	dirsChan := make(chan string, 1000001)
+	filesChan := make(chan string, 1000001)
+
+	var wg sync.WaitGroup
+
+	cmdDirName := "lfs"
+	cmdDirArgs := []string{"find", absPath, "-maxdepth", "1", "-type", "d"}
+
+	cmdDir := exec.Command(cmdDirName, cmdDirArgs...)
+	cmdDirReader, err := cmdDir.StdoutPipe()
+	if err != nil {
+		log.Errorf("Error running lustre find: %v", err)
+		return err
+	}
+
+	scannerDir := bufio.NewScanner(cmdDirReader)
+
+	err = cmdDir.Start()
+	if err != nil {
+		return err
+	}
+
+	wg.Add(1)
+	go func() {
+		defer close(dirsChan)
+		defer wg.Done()
+
+		for scannerDir.Scan() {
+			newDir := scannerDir.Text()
+			if newDir != absPath {
+				dirsChan <- newDir
+			}
+		}
+		cmdDir.Wait()
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for dir := range dirsChan {
+			err := rmDir(dir)
+			if err != nil {
+				log.Errorf("Error processing folder %s: %v", dir, err)
+			}
+		}
+	}()
+
+	cmdFileName := "lfs"
+	cmdFileArgs := []string{"find", absPath, "-maxdepth", "1", "!", "-type", "d"}
+
+	cmdFile := exec.Command(cmdFileName, cmdFileArgs...)
+	cmdFileReader, err := cmdFile.StdoutPipe()
+	if err != nil {
+		log.Errorf("Error running lustre find: %v", err)
+		return err
+	}
+
+	scannerFile := bufio.NewScanner(cmdFileReader)
+
+	err = cmdFile.Start()
+	if err != nil {
+		return err
+	}
+
+	wg.Add(1)
+	go func() {
+		defer close(filesChan)
+		defer wg.Done()
+
+		for scannerFile.Scan() {
+			newFile := scannerFile.Text()
+			filesChan <- newFile
+		}
+		cmdFile.Wait()
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for file := range filesChan {
+			os.Remove(file)
+		}
+	}()
+
+	wg.Wait()
+
+	os.Remove(absPath)
+
+	return nil
 }
 
 func (l LustreDatastore) Open(filePath string) (io.ReadCloser, error) {
