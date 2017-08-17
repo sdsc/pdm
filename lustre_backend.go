@@ -62,6 +62,7 @@ func (l LustreDatastore) RemoveAll(filePath string) error {
 }
 
 func rmDir(absPath string) error {
+	log.Debugf("Deleting folder: %v", absPath)
 	dirsChan := make(chan string, 1000001)
 	filesChan := make(chan string, 1000001)
 
@@ -150,6 +151,7 @@ func rmDir(absPath string) error {
 
 	os.Remove(absPath)
 
+	log.Debugf("Successfully deleted folder: %v", absPath)
 	return nil
 }
 
@@ -209,22 +211,34 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		cmdArgs = []string{"find", curDir, "-maxdepth", "1", "-type", "d"}
 	}
 
-	cmd := exec.Command(cmdName, cmdArgs...)
-	cmdReader, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Errorf("Error running lustre find: %v", err)
-		return nil, err
+	var cmd *exec.Cmd
+	var scanner *bufio.Scanner
+	ran := false
+
+	for !ran {
+		cmd = exec.Command(cmdName, cmdArgs...)
+
+		cmdReader, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, err
+		}
+		scanner = bufio.NewScanner(cmdReader)
+
+		err = cmd.Start()
+		if err != nil {
+			cmd.Wait()
+			log.Debugf("Error running lustre find: %v", err)
+			if err.Error() != "fork/exec /usr/bin/lfs: errno 513" {
+				return nil, err
+			}
+		}
+		ran = true
 	}
 
-	scanner := bufio.NewScanner(cmdReader)
-
-	err = cmd.Start()
-	if err != nil {
-		return nil, err
-	}
 
 	go func(outchan chan []string) {
 		defer close(outchan)
+		defer cmd.Wait()
 		if !listFiles {
 			for scanner.Scan() {
 				folder := scanner.Text()
@@ -258,7 +272,6 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				outchan <- filesBuf
 			}
 		}
-		cmd.Wait()
 	}(outchan)
 
 	return outchan, nil

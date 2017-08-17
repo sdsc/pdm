@@ -268,6 +268,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					// Handle error
 					log.Errorf("Error adding file %s to index: %s", filepath, err)
 				}
+				log.Debugf("%s is %s", filepath, fileType)
 				atomic.AddUint64(&FilesIndexedCount, 1)
 			}
 

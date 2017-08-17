@@ -57,10 +57,16 @@ func readWorkerConfig() {
 	viper.AddConfigPath("$HOME/.pdm")
 	viper.AddConfigPath(".")
 
+	viper.SetDefault("file_prefetch", 16)
+	viper.SetDefault("dir_prefetch", 16)
+
 	viper.SetDefault("dir_workers", 2)
 	viper.SetDefault("file_workers", 2)
 	viper.SetDefault("monitor_mount_sec", 2)
 	viper.SetDefault("elastic_index", "idx")
+
+	viper.SetDefault("copy", "true")
+	viper.SetDefault("scan", "true")
 
 	err := viper.ReadInConfig()
 	if err != nil {
@@ -247,7 +253,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 			continue
 		}
 
-		err = filech.Qos(8, 0, false)
+		err = filech.Qos(viper.GetInt("file_prefetch"), 0, false)
 		if err != nil {
 			log.Fatalf("cannot set channel QoS: %v", err)
 		}
@@ -258,123 +264,127 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 			continue
 		}
 
-		err = dirch.Qos(36, 0, false)
+		err = dirch.Qos(viper.GetInt("dir_prefetch"), 0, false)
 		if err != nil {
 			log.Fatalf("cannot set channel QoS: %v", err)
 		}
 
 		var wg sync.WaitGroup
 
-		for k := range viper.Get("datasource").(map[string]interface{}) {
-			if viper.GetBool(fmt.Sprintf("datasource.%s.write", k)) {
-				for k2 := range viper.Get("datasource").(map[string]interface{}) {
-					if k2 != k {
-						routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
+		if viper.GetBool("copy") {
+			for k := range viper.Get("datasource").(map[string]interface{}) {
+				if viper.GetBool(fmt.Sprintf("datasource.%s.write", k)) {
+					for k2 := range viper.Get("datasource").(map[string]interface{}) {
+						if k2 != k {
+							routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
 
-						queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
-						if err != nil {
-							log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
-							return
-						}
-
-						if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
-							log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
-							return
-						}
-
-						deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
-						if err != nil {
-							log.Errorf("cannot consume from: %q, %v", queueFile, err)
-							return
-						}
-
-						queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
-						if err != nil {
-							log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
-							return
-						}
-
-						if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
-							log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
-							return
-						}
-
-						deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
-						if err != nil {
-							log.Errorf("cannot consume from: %q, %v", queueDir, err)
-							return
-						}
-
-						wg.Add(2)
-
-						go func() {
-							defer wg.Done()
-							for msg := range deliveriesFile {
-								file_messages <- msg
+							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
+							if err != nil {
+								log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
+								return
 							}
-						}()
-						go func() {
-							defer wg.Done()
-							for msg := range deliveriesDir {
-								folder_messages <- msg
+
+							if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
+								log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+								return
 							}
-						}()
+
+							deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
+							if err != nil {
+								log.Errorf("cannot consume from: %q, %v", queueFile, err)
+								return
+							}
+
+							queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
+							if err != nil {
+								log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
+								return
+							}
+
+							if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
+								log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+								return
+							}
+
+							deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
+							if err != nil {
+								log.Errorf("cannot consume from: %q, %v", queueDir, err)
+								return
+							}
+
+							wg.Add(2)
+
+							go func() {
+								defer wg.Done()
+								for msg := range deliveriesFile {
+									file_messages <- msg
+								}
+							}()
+							go func() {
+								defer wg.Done()
+								for msg := range deliveriesDir {
+									folder_messages <- msg
+								}
+							}()
+						}
 					}
 				}
 			}
 		}
 
-		for k := range viper.Get("datasource").(map[string]interface{}) {
-			routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s", k), fmt.Sprintf("dir.%s", k)
+		if viper.GetBool("scan") {
+			for k := range viper.Get("datasource").(map[string]interface{}) {
+				routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s", k), fmt.Sprintf("dir.%s", k)
 
-			queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
-			if err != nil {
-				log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
-				return
-			}
-
-			if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
-				log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
-				return
-			}
-
-			deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
-			if err != nil {
-				log.Errorf("cannot consume from: %q, %v", queueFile, err)
-				return
-			}
-
-			queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
-			if err != nil {
-				log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
-				return
-			}
-
-			if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
-				log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
-				return
-			}
-
-			deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
-			if err != nil {
-				log.Errorf("cannot consume from: %q, %v", queueDir, err)
-				return
-			}
-
-			wg.Add(2)
-
-			go func() {
-				defer wg.Done()
-				for msg := range deliveriesFile {
-					file_messages <- msg
+				queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
+				if err != nil {
+					log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
+					return
 				}
-			}()
-			go func() {
-				defer wg.Done()
-				for msg := range deliveriesDir {
-					folder_messages <- msg
+
+				if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
+					log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+					return
 				}
-			}()
+
+				deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
+				if err != nil {
+					log.Errorf("cannot consume from: %q, %v", queueFile, err)
+					return
+				}
+
+				queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
+				if err != nil {
+					log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
+					return
+				}
+
+				if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
+					log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+					return
+				}
+
+				deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
+				if err != nil {
+					log.Errorf("cannot consume from: %q, %v", queueDir, err)
+					return
+				}
+
+				wg.Add(2)
+
+				go func() {
+					defer wg.Done()
+					for msg := range deliveriesFile {
+						file_messages <- msg
+					}
+				}()
+				go func() {
+					defer wg.Done()
+					for msg := range deliveriesDir {
+						folder_messages <- msg
+					}
+				}()
+			}
 		}
 
 		wg.Wait()
