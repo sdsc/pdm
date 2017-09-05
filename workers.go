@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	elastic "gopkg.in/olivere/elastic.v5"
-
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
@@ -113,6 +111,18 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
 				sourceAtime := getAtime(sourceStat)
 
+				if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
+					logger.Debugf("Skipping the file %s as too new", filepath)
+					atomic.AddUint64(&FilesSkippedCount, 1)
+					continue
+				}
+
+				if fromDataStore.GetSkipFilesOlder() > 0 && time.Since(sourceAtime).Minutes() > float64(fromDataStore.GetSkipFilesOlder()) {
+					logger.Debugf("Skipping the file %s as too old", filepath)
+					atomic.AddUint64(&FilesSkippedCount, 1)
+					continue
+				}
+
 				if viper.GetBool("scan_update") {
 					var indexFiles []string
 
@@ -131,45 +141,35 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 						pubChan <- msg
 					}()
 
-					idxQuery := elastic.NewIndicesQuery(elastic.NewMatchAllQuery(), filepath)
-					res, err := elasticClient.Search(viper.GetString("elastic_index")).
+					res, err := elasticClient.
+						Get().
+						Index(viper.GetString("elastic_index")).
 						Type("file").
-						Query(idxQuery).
+						Id(filepath).
 						Do(context.Background())
 					if err != nil {
-						logger.Errorf("Error querying the document %s: %s", filepath, err.Error())
+						if err.Error() != "elastic: Error 404 (Not Found)" {
+							logger.Errorf("Error retrieving the document %s: %s", filepath, err.Error())
+						} else {
+							indexFiles = append(indexFiles, filepath)
+						}
 					} else {
-						if res.Hits.TotalHits == 0 {
+						if !res.Found {
 							indexFiles = append(indexFiles, filepath)
 						} else {
-							for _, hit := range res.Hits.Hits {
-								// hit.Index contains the name of the index
-
-								// Deserialize hit.Source into a Tweet (could also be just a map[string]interface{}).
-								var f fileIdx
-								err := json.Unmarshal(*hit.Source, &f)
-								if err != nil {
-									logger.Errorf("Error deserializing the document %s: %s", filepath, err.Error())
-								}
-								if f.Size != sourceStat.Size {
-									logger.Debugf("File %s is of size %d, reindexing.", filepath, f.Size)
+							var f fileIdx
+							err := json.Unmarshal(*res.Source, &f)
+							if err != nil {
+								logger.Errorf("Error deserializing the document %s: %s", filepath, err.Error())
+								indexFiles = append(indexFiles, filepath)
+							} else {
+								if f.Size != sourceStat.Size || f.Mtime != sourceMtime {
+									logger.Debugf("File %s is %v, reindexing.", filepath, f)
 									indexFiles = append(indexFiles, filepath)
 								}
 							}
 						}
 					}
-				}
-
-				if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
-					logger.Debugf("Skipping the file %s as too new", filepath)
-					atomic.AddUint64(&FilesSkippedCount, 1)
-					continue
-				}
-
-				if fromDataStore.GetSkipFilesOlder() > 0 && time.Since(sourceAtime).Minutes() > float64(fromDataStore.GetSkipFilesOlder()) {
-					logger.Debugf("Skipping the file %s as too old", filepath)
-					atomic.AddUint64(&FilesSkippedCount, 1)
-					continue
 				}
 
 				if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest file exists
@@ -330,7 +330,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
 
-	logger.Debugf("Processing folder %s", dirPath)
+	//logger.Debugf("Processing folder %s", dirPath)
 	switch taskStruct.Action {
 	case "copy":
 
