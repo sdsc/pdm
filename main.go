@@ -57,11 +57,11 @@ func readWorkerConfig() {
 	viper.AddConfigPath("$HOME/.pdm")
 	viper.AddConfigPath(".")
 
-	viper.SetDefault("file_prefetch", 16)
-	viper.SetDefault("dir_prefetch", 16)
+	viper.SetDefault("file_prefetch", 256)
+	viper.SetDefault("dir_prefetch", 36)
 
-	viper.SetDefault("dir_workers", 2)
-	viper.SetDefault("file_workers", 2)
+	viper.SetDefault("dir_workers", 4)
+	viper.SetDefault("file_workers", 16)
 	viper.SetDefault("monitor_mount_sec", 2)
 	viper.SetDefault("elastic_index", "idx")
 
@@ -278,7 +278,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 						if k2 != k {
 							routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
 
-							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
+							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 							if err != nil {
 								log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 								return
@@ -295,7 +295,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 								return
 							}
 
-							queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
+							queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 							if err != nil {
 								log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 								return
@@ -336,7 +336,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 			for k := range viper.Get("datasource").(map[string]interface{}) {
 				routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s", k), fmt.Sprintf("dir.%s", k)
 
-				queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, nil)
+				queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 				if err != nil {
 					log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 					return
@@ -353,7 +353,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 					return
 				}
 
-				queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, nil)
+				queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 				if err != nil {
 					log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 					return

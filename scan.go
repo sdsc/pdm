@@ -42,7 +42,9 @@ const mapping = `
 
 const maxTikaSize = 65536
 
-var client = &http.Client{}
+var client = &http.Client{Transport: &http.Transport{
+	MaxIdleConnsPerHost: 24,
+}}
 
 func sendFileToTika(filename string) (string, error) {
 	inp, _ := os.Open(filename)
