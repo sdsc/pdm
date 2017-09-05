@@ -62,7 +62,7 @@ func (l LustreDatastore) RemoveAll(filePath string) error {
 }
 
 func rmDir(absPath string) error {
-	log.Debugf("Deleting folder: %v", absPath)
+	logger.Debugf("Deleting folder: %v", absPath)
 	dirsChan := make(chan string, 1000001)
 	filesChan := make(chan string, 1000001)
 
@@ -74,7 +74,7 @@ func rmDir(absPath string) error {
 	cmdDir := exec.Command(cmdDirName, cmdDirArgs...)
 	cmdDirReader, err := cmdDir.StdoutPipe()
 	if err != nil {
-		log.Errorf("Error running lustre find: %v", err)
+		logger.Errorf("Error running lustre find: %v", err)
 		return err
 	}
 
@@ -105,7 +105,7 @@ func rmDir(absPath string) error {
 		for dir := range dirsChan {
 			err := rmDir(dir)
 			if err != nil {
-				log.Errorf("Error processing folder %s: %v", dir, err)
+				logger.Errorf("Error processing folder %s: %v", dir, err)
 			}
 		}
 	}()
@@ -116,7 +116,7 @@ func rmDir(absPath string) error {
 	cmdFile := exec.Command(cmdFileName, cmdFileArgs...)
 	cmdFileReader, err := cmdFile.StdoutPipe()
 	if err != nil {
-		log.Errorf("Error running lustre find: %v", err)
+		logger.Errorf("Error running lustre find: %v", err)
 		return err
 	}
 
@@ -151,7 +151,7 @@ func rmDir(absPath string) error {
 
 	os.Remove(absPath)
 
-	log.Debugf("Successfully deleted folder: %v", absPath)
+	logger.Debugf("Successfully deleted folder: %v", absPath)
 	return nil
 }
 
@@ -165,18 +165,18 @@ func (l LustreDatastore) Create(filePath string, meta os.FileInfo) (io.WriteClos
 		var cmdArgs []string
 		if meta.Size() < Lustre5StripeSize {
 			cmdArgs = []string{"setstripe", "-c", "5", path.Join(l.mountPath, filePath)}
-			log.Debugf("Striping %s across 5", filePath)
+			logger.Debugf("Striping %s across 5", filePath)
 		} else if meta.Size() < Lustre10StripeSize {
 			cmdArgs = []string{"setstripe", "-c", "10", path.Join(l.mountPath, filePath)}
-			log.Debugf("Striping %s across 10", filePath)
+			logger.Debugf("Striping %s across 10", filePath)
 		} else {
 			cmdArgs = []string{"setstripe", "-c", "50", path.Join(l.mountPath, filePath)}
-			log.Debugf("Striping %s across 50", filePath)
+			logger.Debugf("Striping %s across 50", filePath)
 		}
 
 		_, err := exec.Command(cmdName, cmdArgs...).Output()
 		if err != nil {
-			log.Errorf("Error creating striped file: %v", err)
+			logger.Errorf("Error creating striped file: %v", err)
 			return nil, err
 		}
 		return os.OpenFile(path.Join(l.mountPath, filePath), os.O_RDWR|os.O_TRUNC, 0666)
@@ -227,7 +227,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		err = cmd.Start()
 		if err != nil {
 			cmd.Wait()
-			log.Debugf("Error running lustre find: %v", err)
+			logger.Debugf("Error running lustre find: %v", err)
 			if err.Error() != "fork/exec /usr/bin/lfs: errno 513" {
 				return nil, err
 			}
@@ -245,7 +245,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				if folder != curDir {
 					rel, err := filepath.Rel(l.mountPath, folder)
 					if err != nil {
-						log.Errorf("Error resolving folder %s: %v", folder, err)
+						logger.Errorf("Error resolving folder %s: %v", folder, err)
 						continue
 					}
 					outchan <- []string{rel}
@@ -254,7 +254,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		} else {
 			var filesBuf []string
 			for scanner.Scan() {
-				if len(filesBuf) == FILE_CHUNKS {
+				if len(filesBuf) == FileChunks {
 					outchan <- filesBuf
 					filesBuf = nil
 				}
@@ -262,7 +262,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				file := scanner.Text()
 				rel, err := filepath.Rel(l.mountPath, file)
 				if err != nil {
-					log.Errorf("Error resolving file %s: %v", file, err)
+					logger.Errorf("Error resolving file %s: %v", file, err)
 					continue
 				}
 

@@ -68,7 +68,7 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 		go func() {
 			ch, err := sub.Channel()
 			if err != nil {
-				log.Fatalf("cannot create channel: %v", err)
+				logger.Fatalf("cannot create channel: %v", err)
 				return
 			}
 
@@ -81,14 +81,14 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 
 								inspectQueue, err := ch.QueueInspect("file." + routingKey)
 								if err != nil {
-									log.Errorf("Cannot create queue %s: %v", "file."+routingKey, err)
+									logger.Errorf("Cannot create queue %s: %v", "file."+routingKey, err)
 									return
 								}
 								QueueMessagesGauge.WithLabelValues(routingKey, "file").Set(float64(inspectQueue.Messages))
 
 								inspectQueue, err = ch.QueueInspect("dir." + routingKey)
 								if err != nil {
-									log.Errorf("Cannot create queue %s: %v", "dir."+routingKey, err)
+									logger.Errorf("Cannot create queue %s: %v", "dir."+routingKey, err)
 									return
 								}
 								QueueMessagesGauge.WithLabelValues(routingKey, "dir").Set(float64(inspectQueue.Messages))
@@ -101,14 +101,14 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 
 					inspectQueue, err := ch.QueueInspect("file." + routingKey)
 					if err != nil {
-						log.Errorf("Cannot create queue %s: %v", "file."+routingKey, err)
+						logger.Errorf("Cannot create queue %s: %v", "file."+routingKey, err)
 						return
 					}
 					QueueMessagesGauge.WithLabelValues(routingKey, "file").Set(float64(inspectQueue.Messages))
 
 					inspectQueue, err = ch.QueueInspect("dir." + routingKey)
 					if err != nil {
-						log.Errorf("Cannot create queue %s: %v", "dir."+routingKey, err)
+						logger.Errorf("Cannot create queue %s: %v", "dir."+routingKey, err)
 						return
 					}
 					QueueMessagesGauge.WithLabelValues(routingKey, "dir").Set(float64(inspectQueue.Messages))
@@ -118,7 +118,7 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 
 		ch, err := sub.Channel()
 		if err != nil {
-			log.Fatalf("cannot create channel: %v", err)
+			logger.Fatalf("cannot create channel: %v", err)
 			continue
 		}
 
@@ -126,18 +126,18 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 
 		queueMon, err := ch.QueueDeclare("", false, true, true, true, nil)
 		if err != nil {
-			log.Errorf("cannot consume from exclusive queue: %q, %v", queueMon, err)
+			logger.Errorf("cannot consume from exclusive queue: %q, %v", queueMon, err)
 			return
 		}
 
 		if err := ch.QueueBind(queueMon.Name, topic, "amq.topic", false, nil); err != nil {
-			log.Errorf("cannot consume without a binding to exchange: %q, %v", "amq.topic", err)
+			logger.Errorf("cannot consume without a binding to exchange: %q, %v", "amq.topic", err)
 			return
 		}
 
 		deliveriesMon, err := ch.Consume(queueMon.Name, "", false, false, false, false, nil)
 		if err != nil {
-			log.Errorf("cannot consume from: %q, %v", queueMon, err)
+			logger.Errorf("cannot consume from: %q, %v", queueMon, err)
 			return
 		}
 
@@ -164,7 +164,7 @@ func processMonitorStream() chan<- amqp.Delivery {
 			dec := gob.NewDecoder(buf)
 			err := dec.Decode(&curMonMessage)
 			if err != nil {
-				log.Printf("Error parsing message: %s", err)
+				logger.Printf("Error parsing message: %s", err)
 				continue
 			}
 			if curMonMessage.FilesCopied > 0 {

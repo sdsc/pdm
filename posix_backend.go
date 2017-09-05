@@ -92,7 +92,7 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 	cmd := exec.Command(cmdName, cmdArgs...)
 	cmdReader, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Errorf("Error running find: %v", err)
+		logger.Errorf("Error running find: %v", err)
 		return nil, err
 	}
 
@@ -111,7 +111,7 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 				if folder != curDir {
 					rel, err := filepath.Rel(l.mountPath, folder)
 					if err != nil {
-						log.Errorf("Error resolving folder %s: %v", folder, err)
+						logger.Errorf("Error resolving folder %s: %v", folder, err)
 						continue
 					}
 					outchan <- []string{rel}
@@ -120,7 +120,7 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 		} else {
 			var filesBuf []string
 			for scanner.Scan() {
-				if len(filesBuf) == FILE_CHUNKS {
+				if len(filesBuf) == FileChunks {
 					outchan <- filesBuf
 					filesBuf = nil
 				}
@@ -128,7 +128,7 @@ func (l PosixDatastore) ListDir(dirPath string, listFiles bool) (chan []string, 
 				file := scanner.Text()
 				rel, err := filepath.Rel(l.mountPath, file)
 				if err != nil {
-					log.Errorf("Error resolving file %s: %v", file, err)
+					logger.Errorf("Error resolving file %s: %v", file, err)
 					continue
 				}
 

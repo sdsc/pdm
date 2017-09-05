@@ -3,16 +3,17 @@ package main
 import (
 	"bytes"
 	"encoding/gob"
-	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
-	"github.com/spf13/viper"
-	"github.com/streadway/amqp"
-	"golang.org/x/net/context"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
+	"github.com/spf13/viper"
+	"github.com/streadway/amqp"
+	"golang.org/x/net/context"
 )
 
 func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
@@ -23,15 +24,15 @@ func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 			defer wg.Done()
 			for msg := range msgs {
 				routingKeySplit := strings.Split(msg.RoutingKey, ".")
-				fromDataStore := data_backends[routingKeySplit[1]]
+				fromDataStore := dataBackends[routingKeySplit[1]]
 				var toDataStore storage_backend
 				if len(routingKeySplit) > 2 {
-					toDataStore = data_backends[routingKeySplit[2]]
+					toDataStore = dataBackends[routingKeySplit[2]]
 				}
 
 				curTask, err := decodeTask(msg.Body)
 				if err != nil {
-					log.Errorf("Error parsing message: %s", err)
+					logger.Errorf("Error parsing message: %s", err)
 					continue
 				}
 
@@ -56,15 +57,15 @@ func processFoldersStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 			defer wg.Done()
 			for msg := range msgs {
 				routingKeySplit := strings.Split(msg.RoutingKey, ".")
-				fromDataStore := data_backends[routingKeySplit[1]]
+				fromDataStore := dataBackends[routingKeySplit[1]]
 				var toDataStore storage_backend
 				if len(routingKeySplit) > 2 {
-					toDataStore = data_backends[routingKeySplit[2]]
+					toDataStore = dataBackends[routingKeySplit[2]]
 				}
 
 				curTask, err := decodeTask(msg.Body)
 				if err != nil {
-					log.Errorf("Error parsing message: %s", err)
+					logger.Errorf("Error parsing message: %s", err)
 					continue
 				}
 
@@ -90,13 +91,13 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 	case "copy":
 
 		for _, filepath := range taskStruct.ItemPath {
-			//log.Debugf("Processing %s", filepath)
+			//logger.Debugf("Processing %s", filepath)
 			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source file
-					log.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
+					logger.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
 				} else {
-					log.Errorf("Error reading file %s metadata: %s", filepath, err)
+					logger.Errorf("Error reading file %s metadata: %s", filepath, err)
 				}
 				continue
 			}
@@ -110,13 +111,13 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				sourceAtime := getAtime(sourceStat)
 
 				if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
-					log.Debugf("Skipping the file %s as too new", filepath)
+					logger.Debugf("Skipping the file %s as too new", filepath)
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
 
 				if fromDataStore.GetSkipFilesOlder() > 0 && time.Since(sourceAtime).Minutes() > float64(fromDataStore.GetSkipFilesOlder()) {
-					log.Debugf("Skipping the file %s as too old", filepath)
+					logger.Debugf("Skipping the file %s as too old", filepath)
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					continue
 				}
@@ -128,34 +129,32 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					if sourceFileMeta.Size() == destFileMeta.Size() &&
 						sourceFileMeta.Mode() == destFileMeta.Mode() &&
 						sourceMtime == destMtime {
-						//log.Debug("File %s hasn't been changed ", filepath)
+						//logger.Debug("File %s hasn't been changed ", filepath)
 						atomic.AddUint64(&FilesSkippedCount, 1)
 						continue
 					}
-					//log.Debugf("File %s exists and is modified ", filepath)
+					//logger.Debugf("File %s exists and is modified ", filepath)
 					err = toDataStore.Remove(filepath)
 					if err != nil {
-						log.Error("Error removing file ", filepath, ": ", err)
+						logger.Error("Error removing file ", filepath, ": ", err)
 						continue
 					}
-
-					// TODO: setstripe
 				}
 
-				//log.Debug("Started copying %s %d", filepath, worker)
+				//logger.Debug("Started copying %s %d", filepath, worker)
 				src, err := fromDataStore.Open(filepath)
 				if err != nil {
-					log.Error("Error opening src file ", filepath, ": ", err)
+					logger.Error("Error opening src file ", filepath, ": ", err)
 					continue
 				}
 				dest, err := toDataStore.Create(filepath, sourceFileMeta)
 				if err != nil {
-					log.Error("Error opening dst file ", filepath, ": ", err)
+					logger.Error("Error opening dst file ", filepath, ": ", err)
 					continue
 				}
 				bytesCopied, err := bufioprop.Copy(dest, src, 1048559)
 				if err != nil {
-					log.Error("Error copying file ", filepath, ": ", err)
+					logger.Error("Error copying file ", filepath, ": ", err)
 					continue
 				}
 
@@ -169,10 +168,10 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				atomic.AddUint64(&FilesCopiedCount, 1)
 				atomic.AddUint64(&BytesCount, uint64(bytesCopied))
 
-				//log.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
+				//logger.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
 			case mode.IsDir():
 				// shouldn't happen
-				log.Error("File ", filepath, " appeared to be a folder")
+				logger.Error("File ", filepath, " appeared to be a folder")
 			case mode&os.ModeSymlink != 0:
 				sourceMtime := sourceFileMeta.ModTime()
 				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
@@ -185,23 +184,23 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 						atomic.AddUint64(&FilesSkippedCount, 1)
 						continue
 					}
-					//log.Debugf("Removing symlink %s", filepath)
+					//logger.Debugf("Removing symlink %s", filepath)
 					err = toDataStore.Remove(filepath)
 					if err != nil {
-						log.Error("Error removing symlink ", filepath, ": ", err)
+						logger.Error("Error removing symlink ", filepath, ": ", err)
 						continue
 					}
 				}
 
 				linkTarget, err := fromDataStore.Readlink(filepath)
 				if err != nil {
-					log.Error("Error reading symlink ", filepath, ": ", err)
+					logger.Error("Error reading symlink ", filepath, ": ", err)
 					continue
 				}
 
 				err = toDataStore.Symlink(linkTarget, filepath)
 				if err != nil {
-					log.Error("Error seting symlink ", filepath, ": ", err)
+					logger.Error("Error seting symlink ", filepath, ": ", err)
 					continue
 				}
 
@@ -211,7 +210,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				atomic.AddUint64(&FilesCopiedCount, 1)
 
 			case mode&os.ModeNamedPipe != 0:
-				log.Error("File ", filepath, " is a named pipe. Not supported yet.")
+				logger.Error("File ", filepath, " is a named pipe. Not supported yet.")
 			}
 		}
 	case "clear":
@@ -219,14 +218,14 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			_, err := fromDataStore.GetMetadata(filepath)
 			if err != nil {
 				if os.IsNotExist(err) {
-					log.Debugf("Error reading file %s metadata, not exists, removing from target: %s", filepath, err)
+					logger.Debugf("Error reading file %s metadata, not exists, removing from target: %s", filepath, err)
 					err = toDataStore.Remove(filepath)
 					atomic.AddUint64(&FilesRemovedCount, 1)
 					if err != nil {
-						log.Error("Error clearing target file ", filepath, ": ", err)
+						logger.Error("Error clearing target file ", filepath, ": ", err)
 					}
 				} else {
-					log.Errorf("Error reading file %s metadata: %s", filepath, err)
+					logger.Errorf("Error reading file %s metadata: %s", filepath, err)
 				}
 			} else { // else the source file exists
 				atomic.AddUint64(&FilesSkippedCount, 1)
@@ -234,13 +233,13 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		}
 	case "scan":
 		for _, filepath := range taskStruct.ItemPath {
-			log.Debugf("Scanning %s", filepath)
+			logger.Debugf("Scanning %s", filepath)
 			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 			if err != nil {
 				if os.IsNotExist(err) {
-					log.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
+					logger.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
 				} else {
-					log.Errorf("Error reading file %s metadata: %s", filepath, err)
+					logger.Errorf("Error reading file %s metadata: %s", filepath, err)
 				}
 				continue
 			}
@@ -248,14 +247,14 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			if sourceFileMeta.Mode().IsRegular() {
 				fileType, err := getFileType(fromDataStore.GetLocalFilepath(filepath))
 				if err != nil {
-					log.Errorf("Error recognising %s metadata: %s", filepath, err)
+					logger.Errorf("Error recognising %s metadata: %s", filepath, err)
 					continue
 				}
 
 				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
 				sourceAtime := getAtime(sourceStat)
 
-				// log.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
+				// logger.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
 				fileIndex := fileIdx{sourceFileMeta.Size(), fileType, sourceFileMeta.ModTime(), sourceAtime}
 				_, err = elasticClient.Index().
 					Index(viper.GetString("elastic_index")).
@@ -266,9 +265,9 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					Do(context.Background())
 				if err != nil {
 					// Handle error
-					log.Errorf("Error adding file %s to index: %s", filepath, err)
+					logger.Errorf("Error adding file %s to index: %s", filepath, err)
 				}
-				log.Debugf("%s is %s", filepath, fileType)
+				logger.Debugf("%s is %s", filepath, fileType)
 				atomic.AddUint64(&FilesIndexedCount, 1)
 			}
 
@@ -281,7 +280,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
 
-	log.Debugf("Processing folder %s", dirPath)
+	logger.Debugf("Processing folder %s", dirPath)
 	switch taskStruct.Action {
 	case "copy":
 
@@ -289,10 +288,10 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source folder
-					log.Debugf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
+					logger.Debugf("Error reading folder %s metadata or source folder not exists: %s", dirPath, err)
 					return nil
 				} else {
-					log.Errorf("Error reading folder %s: %s", dirPath, err)
+					logger.Errorf("Error reading folder %s: %s", dirPath, err)
 					return err
 				}
 			}
@@ -323,7 +322,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		dirsChan, err := fromDataStore.ListDir(dirPath, false)
 		if err != nil {
-			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			logger.Errorf("Error listing folder %s: %s", dirPath, err)
 			return err
 		}
 
@@ -334,7 +333,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			taskEnc, err := encodeTask(msgTask)
 			if err != nil {
-				log.Error("Error encoding dir message: ", err)
+				logger.Error("Error encoding dir message: ", err)
 				continue
 			}
 
@@ -344,7 +343,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		filesChan, err := fromDataStore.ListDir(dirPath, true)
 		if err != nil {
-			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			logger.Errorf("Error listing folder %s: %s", dirPath, err)
 			return err
 		}
 
@@ -355,7 +354,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			taskEnc, err := encodeTask(msgTask)
 			if err != nil {
-				log.Error("Error encoding monitoring message: ", err)
+				logger.Error("Error encoding monitoring message: ", err)
 				continue
 			}
 
@@ -374,7 +373,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		dirsChan, err := toDataStore.ListDir(dirPath, false)
 		if err != nil {
-			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			logger.Errorf("Error listing folder %s: %s", dirPath, err)
 			return err
 		}
 
@@ -385,7 +384,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			taskEnc, err := encodeTask(msgTask)
 			if err != nil {
-				log.Error("Error encoding dir message: ", err)
+				logger.Error("Error encoding dir message: ", err)
 				continue
 			}
 
@@ -395,7 +394,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		filesChan, err := toDataStore.ListDir(dirPath, true)
 		if err != nil {
-			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			logger.Errorf("Error listing folder %s: %s", dirPath, err)
 			return err
 		}
 
@@ -406,7 +405,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			taskEnc, err := encodeTask(msgTask)
 			if err != nil {
-				log.Error("Error encoding monitoring message: ", err)
+				logger.Error("Error encoding monitoring message: ", err)
 				continue
 			}
 
@@ -419,10 +418,10 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			_, err := fromDataStore.GetMetadata(dirPath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source folder
-					log.Debugf("Source folder not exists: %s", dirPath, err)
+					logger.Debugf("Source folder not exists: %s", dirPath, err)
 					return nil
 				} else {
-					log.Errorf("Error reading source folder %s: %s", dirPath, err)
+					logger.Errorf("Error reading source folder %s: %s", dirPath, err)
 					return err
 				}
 			}
@@ -430,7 +429,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		dirsChan, err := fromDataStore.ListDir(dirPath, false)
 		if err != nil {
-			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			logger.Errorf("Error listing folder %s: %s", dirPath, err)
 			return err
 		}
 
@@ -441,7 +440,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			taskEnc, err := encodeTask(msgTask)
 			if err != nil {
-				log.Error("Error encoding dir message: ", err)
+				logger.Error("Error encoding dir message: ", err)
 				continue
 			}
 
@@ -451,7 +450,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		filesChan, err := fromDataStore.ListDir(dirPath, true)
 		if err != nil {
-			log.Errorf("Error listing folder %s: %s", dirPath, err)
+			logger.Errorf("Error listing folder %s: %s", dirPath, err)
 			return err
 		}
 
@@ -462,7 +461,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			taskEnc, err := encodeTask(msgTask)
 			if err != nil {
-				log.Error("Error encoding monitoring message: ", err)
+				logger.Error("Error encoding monitoring message: ", err)
 				continue
 			}
 

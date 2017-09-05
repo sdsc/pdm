@@ -19,9 +19,10 @@ import (
 	"golang.org/x/net/context"
 	"gopkg.in/alecthomas/kingpin.v2"
 
+	"net/http"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"net/http"
 
 	"github.com/Sirupsen/logrus"
 	"gopkg.in/olivere/elastic.v5"
@@ -77,23 +78,24 @@ func readWorkerConfig() {
 // These are variables used by workers to keep the statistics and periodically send
 // these via rabbitmq to the aggregator
 var (
-	FilesCopiedCount   uint64 = 0
-	FilesRemovedCount  uint64 = 0
-	FilesSkippedCount  uint64 = 0
-	FilesIndexedCount  uint64 = 0
-	BytesCount         uint64 = 0
-	FoldersCopiedCount uint64 = 0
+	FilesCopiedCount   uint64
+	FilesRemovedCount  uint64
+	FilesSkippedCount  uint64
+	FilesIndexedCount  uint64
+	BytesCount         uint64
+	FoldersCopiedCount uint64
 )
 
-var log = logrus.New()
+var logger = logrus.New()
 
-const FILE_CHUNKS = 1000
+// FileChunks is the maximum number of files to put in one message
+const FileChunks = 1000
 
 const prometheusTopic = "prometheus"
 
 const tasksExchange = "tasks"
 
-var data_backends = make(map[string]storage_backend)
+var dataBackends = make(map[string]storage_backend)
 
 var pubChan = make(chan message, 512)
 
@@ -141,19 +143,19 @@ func redial(ctx context.Context, url string) chan chan session {
 			select {
 			case sessions <- sess:
 			case <-ctx.Done():
-				log.Debug("shutting down session factory")
+				logger.Debug("shutting down session factory")
 				return
 			}
 
 			conn, err := amqp.Dial(url)
 			if err != nil {
-				log.Fatalf("cannot (re)dial: %v: %q", err, url)
+				logger.Fatalf("cannot (re)dial: %v: %q", err, url)
 			}
 
 			select {
 			case sess <- session{conn}:
 			case <-ctx.Done():
-				log.Debug("shutting down new session")
+				logger.Debug("shutting down new session")
 				return
 			}
 		}
@@ -165,7 +167,7 @@ func redial(ctx context.Context, url string) chan chan session {
 func publish(sessions chan chan session, messages <-chan message, cancel context.CancelFunc) {
 
 	for session := range sessions {
-		log.Info("redial publish")
+		logger.Info("redial publish")
 		var (
 			running bool
 			reading = messages
@@ -177,24 +179,24 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 
 		ch, err := pub.Channel()
 		if err != nil {
-			log.Fatalf("cannot create channel: %v", err)
+			logger.Fatalf("cannot create channel: %v", err)
 			continue
 		}
 
 		if err := ch.ExchangeDeclare(tasksExchange, "topic", false, true, false, false, nil); err != nil {
-			log.Fatalf("cannot declare exchange: %v", err)
+			logger.Fatalf("cannot declare exchange: %v", err)
 			continue
 		}
 
 		// publisher confirms for this channel/connection
 		if err := ch.Confirm(false); err != nil {
-			log.Error("publisher confirms not supported")
+			logger.Error("publisher confirms not supported")
 			close(confirm) // confirms not supported, simulate by always nacking
 		} else {
 			ch.NotifyPublish(confirm)
 		}
 
-		log.Debug("publishing...")
+		logger.Debug("publishing...")
 
 	Publish:
 		for {
@@ -205,7 +207,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 					break Publish
 				}
 				if !confirmed.Ack {
-					log.Debugf("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
+					logger.Debugf("nack message %d, body: %q", confirmed.DeliveryTag, string(msg.Body))
 				}
 				reading = messages
 
@@ -244,29 +246,29 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, folder_messages chan<- amqp.Delivery) {
 
 	for session := range sessions {
-		log.Info("redial subscribe")
+		logger.Info("redial subscribe")
 		sub := <-session
 
 		filech, err := sub.Channel()
 		if err != nil {
-			log.Fatalf("cannot create channel: %v", err)
+			logger.Fatalf("cannot create channel: %v", err)
 			continue
 		}
 
 		err = filech.Qos(viper.GetInt("file_prefetch"), 0, false)
 		if err != nil {
-			log.Fatalf("cannot set channel QoS: %v", err)
+			logger.Fatalf("cannot set channel QoS: %v", err)
 		}
 
 		dirch, err := sub.Channel()
 		if err != nil {
-			log.Fatalf("cannot create channel: %v", err)
+			logger.Fatalf("cannot create channel: %v", err)
 			continue
 		}
 
 		err = dirch.Qos(viper.GetInt("dir_prefetch"), 0, false)
 		if err != nil {
-			log.Fatalf("cannot set channel QoS: %v", err)
+			logger.Fatalf("cannot set channel QoS: %v", err)
 		}
 
 		var wg sync.WaitGroup
@@ -280,35 +282,35 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 
 							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 							if err != nil {
-								log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
+								logger.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 								return
 							}
 
 							if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
-								log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+								logger.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 								return
 							}
 
 							deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
 							if err != nil {
-								log.Errorf("cannot consume from: %q, %v", queueFile, err)
+								logger.Errorf("cannot consume from: %q, %v", queueFile, err)
 								return
 							}
 
 							queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 							if err != nil {
-								log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
+								logger.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 								return
 							}
 
 							if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
-								log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+								logger.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 								return
 							}
 
 							deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
 							if err != nil {
-								log.Errorf("cannot consume from: %q, %v", queueDir, err)
+								logger.Errorf("cannot consume from: %q, %v", queueDir, err)
 								return
 							}
 
@@ -338,35 +340,35 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 
 				queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 				if err != nil {
-					log.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
+					logger.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 					return
 				}
 
 				if err := filech.QueueBind(queueFile.Name, routingKeyFile, tasksExchange, false, nil); err != nil {
-					log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+					logger.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 					return
 				}
 
 				deliveriesFile, err := filech.Consume(queueFile.Name, "", false, false, false, false, nil)
 				if err != nil {
-					log.Errorf("cannot consume from: %q, %v", queueFile, err)
+					logger.Errorf("cannot consume from: %q, %v", queueFile, err)
 					return
 				}
 
 				queueDir, err := dirch.QueueDeclare(routingKeyDir, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
 				if err != nil {
-					log.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
+					logger.Errorf("cannot consume from exclusive queue: %q, %v", queueDir, err)
 					return
 				}
 
 				if err := dirch.QueueBind(queueDir.Name, routingKeyDir, tasksExchange, false, nil); err != nil {
-					log.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
+					logger.Errorf("cannot consume without a binding to exchange: %q, %v", tasksExchange, err)
 					return
 				}
 
 				deliveriesDir, err := dirch.Consume(queueDir.Name, "", false, false, false, false, nil)
 				if err != nil {
-					log.Errorf("cannot consume from: %q, %v", queueDir, err)
+					logger.Errorf("cannot consume from: %q, %v", queueDir, err)
 					return
 				}
 
@@ -394,41 +396,41 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 func initElasticLog() {
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Error("Error getting hostname: ", err)
+		logger.Error("Error getting hostname: ", err)
 		return
 	}
 
 	elasticClient_, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
 	elasticClient = elasticClient_
 	if err != nil {
-		log.Panic(err)
+		logger.Panic(err)
 		return
 	}
 
 	hook, err := elogrus.NewElasticHook(elasticClient, hostname, logrus.DebugLevel, "pdmlog")
 	if err != nil {
-		log.Panic(err)
+		logger.Panic(err)
 		return
 	}
-	log.Hooks.Add(hook)
+	logger.Hooks.Add(hook)
 
-	log.Out = ioutil.Discard
+	logger.Out = ioutil.Discard
 
-	log.Debug("Initing the elastic log")
+	logger.Debug("Initing the elastic log")
 	exists, err := elasticClient.IndexExists(viper.GetString("elastic_index")).Do(context.Background())
 	if err != nil {
-		log.Error(err)
+		logger.Error(err)
 		return
 	}
 	if !exists {
 		_, err = elasticClient.CreateIndex(viper.GetString("elastic_index")).BodyString(mapping).Do(context.Background())
 		if err != nil {
 			// Handle error
-			log.Error(err)
+			logger.Error(err)
 			return
 		}
 	}
-	log.Debug("Initing the elastic log done")
+	logger.Debug("Initing the elastic log done")
 
 }
 
@@ -471,7 +473,7 @@ func main() {
 		}
 
 		if viper.IsSet("debug") && viper.GetBool("debug") {
-			log.Level = logrus.DebugLevel
+			logger.Level = logrus.DebugLevel
 		}
 
 		var checkMountpoints []string
@@ -488,14 +490,14 @@ func main() {
 		for k := range viper.Get("datasource").(map[string]interface{}) {
 			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
 			case "lustre":
-				data_backends[k] = LustreDatastore{
+				dataBackends[k] = LustreDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
 			case "posix":
-				data_backends[k] = PosixDatastore{
+				dataBackends[k] = PosixDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
@@ -513,13 +515,13 @@ func main() {
 					var stat1, stat2 syscall.Stat_t
 					for _, mountpoint := range checkMountpoints {
 						if err := syscall.Stat(mountpoint, &stat1); err != nil {
-							log.Fatalf("Error checking mountpoint %s: %s", mountpoint, err)
+							logger.Fatalf("Error checking mountpoint %s: %s", mountpoint, err)
 						}
 						if err := syscall.Stat(path.Dir(mountpoint), &stat2); err != nil {
-							log.Fatalf("Error checking mountpoint %s: %s", path.Dir(mountpoint), err)
+							logger.Fatalf("Error checking mountpoint %s: %s", path.Dir(mountpoint), err)
 						}
 						if stat1.Dev == stat2.Dev {
-							log.Fatalf("Filesystem %s is not mounted. Exiting", mountpoint)
+							logger.Fatalf("Filesystem %s is not mounted. Exiting", mountpoint)
 							done()
 						}
 					}
@@ -551,7 +553,7 @@ func main() {
 				curFoldersCopiedCount := atomic.SwapUint64(&FoldersCopiedCount, 0)
 				hostname, err := os.Hostname()
 				if err != nil {
-					log.Error("Error getting hostname: ", err)
+					logger.Error("Error getting hostname: ", err)
 				}
 				msgBody := monMessage{
 					"none",
@@ -567,7 +569,7 @@ func main() {
 				enc := gob.NewEncoder(&buf)
 				err = enc.Encode(msgBody)
 				if err != nil {
-					log.Error("Error encoding message: ", err)
+					logger.Error("Error encoding message: ", err)
 					continue
 				}
 
@@ -580,7 +582,7 @@ func main() {
 
 	case copyCommand.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {
-			log.Level = logrus.DebugLevel
+			logger.Level = logrus.DebugLevel
 		}
 
 		rabbitmqServer := ""
@@ -610,7 +612,7 @@ func main() {
 		enc := gob.NewEncoder(&buf)
 		err := enc.Encode(msgTask)
 		if err != nil {
-			log.Error("Error encoding message: ", err)
+			logger.Error("Error encoding message: ", err)
 			return
 		}
 
@@ -620,7 +622,7 @@ func main() {
 
 	case clearCommand.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {
-			log.Level = logrus.DebugLevel
+			logger.Level = logrus.DebugLevel
 		}
 
 		rabbitmqServer := ""
@@ -648,7 +650,7 @@ func main() {
 
 		taskEnc, err := encodeTask(msgTask)
 		if err != nil {
-			log.Error("Error encoding message: ", err)
+			logger.Error("Error encoding message: ", err)
 			return
 		}
 
@@ -658,7 +660,7 @@ func main() {
 
 	case scanCommand.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {
-			log.Level = logrus.DebugLevel
+			logger.Level = logrus.DebugLevel
 		}
 
 		rabbitmqServer := ""
@@ -686,7 +688,7 @@ func main() {
 
 		taskEnc, err := encodeTask(msgTask)
 		if err != nil {
-			log.Error("Error encoding message: ", err)
+			logger.Error("Error encoding message: ", err)
 			return
 		}
 
@@ -696,7 +698,7 @@ func main() {
 
 	case monitor.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {
-			log.Level = logrus.DebugLevel
+			logger.Level = logrus.DebugLevel
 		}
 
 		readWorkerConfig()
@@ -714,7 +716,7 @@ func main() {
 		}()
 
 		http.Handle("/metrics", promhttp.Handler())
-		log.Fatal(http.ListenAndServe(":8082", nil))
+		logger.Fatal(http.ListenAndServe(":8082", nil))
 
 	}
 
