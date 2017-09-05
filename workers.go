@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	elastic "gopkg.in/olivere/elastic.v5"
 
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
@@ -109,6 +112,53 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				sourceMtime := sourceFileMeta.ModTime()
 				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
 				sourceAtime := getAtime(sourceStat)
+
+				if viper.GetBool("scan_update") {
+					var indexFiles []string
+
+					defer func() {
+						msgTask := task{
+							"scan",
+							indexFiles}
+
+						taskEnc, err := encodeTask(msgTask)
+						if err != nil {
+							logger.Error("Error encoding files message: ", err)
+							return
+						}
+
+						msg := message{taskEnc, "file." + toDataStore.GetId()}
+						pubChan <- msg
+					}()
+
+					idxQuery := elastic.NewIndicesQuery(elastic.NewMatchAllQuery(), filepath)
+					res, err := elasticClient.Search(viper.GetString("elastic_index")).
+						Type("file").
+						Query(idxQuery).
+						Do(context.Background())
+					if err != nil {
+						logger.Errorf("Error querying the document %s: %s", filepath, err.Error())
+					} else {
+						if res.Hits.TotalHits == 0 {
+							indexFiles = append(indexFiles, filepath)
+						} else {
+							for _, hit := range res.Hits.Hits {
+								// hit.Index contains the name of the index
+
+								// Deserialize hit.Source into a Tweet (could also be just a map[string]interface{}).
+								var f fileIdx
+								err := json.Unmarshal(*hit.Source, &f)
+								if err != nil {
+									logger.Errorf("Error deserializing the document %s: %s", filepath, err.Error())
+								}
+								if f.Size != sourceStat.Size {
+									logger.Debugf("File %s is of size %d, reindexing.", filepath, f.Size)
+									indexFiles = append(indexFiles, filepath)
+								}
+							}
+						}
+					}
+				}
 
 				if fromDataStore.GetSkipFilesNewer() > 0 && time.Since(sourceMtime).Minutes() < float64(fromDataStore.GetSkipFilesNewer()) {
 					logger.Debugf("Skipping the file %s as too new", filepath)
