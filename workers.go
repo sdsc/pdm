@@ -90,6 +90,26 @@ func processFoldersStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 func processFiles(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
 	switch taskStruct.Action {
 	case "copy":
+		var indexFiles []string
+		if viper.GetBool("scan_update") {
+			defer func() {
+				if len(indexFiles) == 0 {
+					return
+				}
+				msgTask := task{
+					"scan",
+					indexFiles}
+
+				taskEnc, err := encodeTask(msgTask)
+				if err != nil {
+					logger.Error("Error encoding files message: ", err)
+					return
+				}
+
+				msg := message{taskEnc, "file." + toDataStore.GetId()}
+				pubChan <- msg
+			}()
+		}
 
 		for _, filepath := range taskStruct.ItemPath {
 			//logger.Debugf("Processing %s", filepath)
@@ -124,23 +144,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				}
 
 				if viper.GetBool("scan_update") {
-					var indexFiles []string
-
-					defer func() {
-						msgTask := task{
-							"scan",
-							indexFiles}
-
-						taskEnc, err := encodeTask(msgTask)
-						if err != nil {
-							logger.Error("Error encoding files message: ", err)
-							return
-						}
-
-						msg := message{taskEnc, "file." + toDataStore.GetId()}
-						pubChan <- msg
-					}()
-
 					res, err := elasticClient.
 						Get().
 						Index(viper.GetString("elastic_index")).
@@ -311,7 +314,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					Type("file").
 					Id(filepath).
 					BodyJson(fileIndex).
-					Refresh("true").
 					Do(context.Background())
 				if err != nil {
 					// Handle error
