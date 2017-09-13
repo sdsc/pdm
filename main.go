@@ -115,6 +115,9 @@ type task struct {
 }
 
 type fileIdx struct {
+	Path  string    `json:"path"`
+	User  string    `json:"user"`
+	Group string    `json:"group"`
 	Size  int64     `json:"size"`
 	Type  string    `json:"type"`
 	Mtime time.Time `json:"mtime,omitempty"`
@@ -459,6 +462,10 @@ var (
 	fsScanParam             = scanCommand.Arg("fs", "The fs mount ID").Required().String()
 	pathScanParam           = scanCommand.Arg("path", "The path to scan, relative to the mount").Required().String()
 
+	clearScanCommand             = app.Command("clearscan", "Scan the indexed files and remove the ones not existing")
+	rabbitmqServerClearScanParam = clearScanCommand.Flag("rabbitmq", "RabbitMQ connect string.  (Can also be set in PDM_RABBITMQ environmental variable)").String()
+	fsClearScanParam             = clearScanCommand.Arg("fs", "The fs mount ID").Required().String()
+
 	monitor = app.Command("monitor", "Start monitoring daemon")
 )
 
@@ -695,6 +702,49 @@ func main() {
 		var msg = message{taskEnc, queuePrefix + "." + *fsScanParam}
 		pub_chan <- msg
 		close(pub_chan)
+
+	case clearScanCommand.FullCommand():
+		readWorkerConfig()
+
+		if viper.IsSet("elastic_url") {
+			initElasticLog()
+		}
+
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			logger.Level = logrus.DebugLevel
+		}
+
+		for k := range viper.Get("datasource").(map[string]interface{}) {
+			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
+			case "lustre":
+				dataBackends[k] = LustreDatastore{
+					k,
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+			case "posix":
+				dataBackends[k] = PosixDatastore{
+					k,
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+			}
+		}
+
+		var workersWg sync.WaitGroup
+
+		go func() {
+			workersWg.Add(1)
+			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), pubChan, nil)
+			workersWg.Done()
+			done()
+		}()
+
+		workersWg.Wait()
+
+		getElasticFiles(dataBackends[*fsScanParam])
 
 	case monitor.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {

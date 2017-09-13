@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -15,6 +16,9 @@ import (
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
+	"gopkg.in/olivere/elastic.v5"
+	"golang.org/x/sync/errgroup"
+	"gopkg.in/cheggaaa/pb.v1"
 )
 
 func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
@@ -145,27 +149,25 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 				if viper.GetBool("scan_update") {
 					res, err := elasticClient.
-						Get().
+						Search().
 						Index(viper.GetString("elastic_index")).
+						Query(elastic.NewTermQuery("path", filepath)).
 						Type("file").
-						Id(filepath).
 						Do(context.Background())
 					if err != nil {
-						if err.Error() != "elastic: Error 404 (Not Found)" {
-							logger.Errorf("Error retrieving the document %s: %s", filepath, err.Error())
-						} else {
-							indexFiles = append(indexFiles, filepath)
-						}
+						logger.Errorf("Error retrieving the document %s: %s", filepath, err.Error())
 					} else {
-						if !res.Found {
+						if res.Hits.TotalHits == 0 {
 							indexFiles = append(indexFiles, filepath)
+							logger.Debugf("File %s is not in index")
 						} else {
 							var f fileIdx
-							err := json.Unmarshal(*res.Source, &f)
+							err := json.Unmarshal(*res.Hits.Hits[0].Source, &f)
 							if err != nil {
 								logger.Errorf("Error deserializing the document %s: %s", filepath, err.Error())
 								indexFiles = append(indexFiles, filepath)
 							} else {
+								//logger.Debugf("File %s is in index", filepath)
 								if f.Size != sourceStat.Size || f.Mtime != sourceMtime {
 									logger.Debugf("File %s is %v, reindexing.", filepath, f)
 									indexFiles = append(indexFiles, filepath)
@@ -308,11 +310,18 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				sourceAtime := getAtime(sourceStat)
 
 				// logger.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
-				fileIndex := fileIdx{sourceFileMeta.Size(), fileType, sourceFileMeta.ModTime(), sourceAtime}
+				dirs := strings.Split(filepath, "/")
+				var user, group string
+				if len(dirs) > 0 {
+					group = dirs[0]
+					if len(dirs) > 1 {
+						user = dirs[1]
+					}
+				}
+				fileIndex := fileIdx{filepath, user, group, sourceFileMeta.Size(), fileType, sourceFileMeta.ModTime(), sourceAtime}
 				_, err = elasticClient.Index().
 					Index(viper.GetString("elastic_index")).
 					Type("file").
-					Id(filepath).
 					BodyJson(fileIndex).
 					Do(context.Background())
 				if err != nil {
@@ -323,6 +332,24 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				atomic.AddUint64(&FilesIndexedCount, 1)
 			}
 
+		}
+	case "clearscan":
+		for _, filepath := range taskStruct.ItemPath {
+			_, err := fromDataStore.GetMetadata(filepath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					logger.Debugf("Error reading file %s metadata, not exists, removing from index: %s", filepath, err)
+					elasticClient.DeleteByQuery(viper.GetString("elastic_index")).Query(elastic.NewMatchQuery("path", filepath)).Do(context.Background())
+					atomic.AddUint64(&FilesRemovedCount, 1)
+					if err != nil {
+						logger.Error("Error clearing target file ", filepath, ": ", err)
+					}
+				} else {
+					logger.Errorf("Error reading file %s metadata: %s", filepath, err)
+				}
+			} else { // else the source file exists
+				atomic.AddUint64(&FilesSkippedCount, 1)
+			}
 		}
 	}
 }
@@ -544,4 +571,96 @@ func decodeTask(taskBytes []byte) (task, error) {
 		return curTask, err
 	}
 	return curTask, nil
+}
+
+func getElasticFiles(dataStore storage_backend) {
+	client, err := elastic.NewClient(elastic.SetURL(viper.GetString("elastic_url")))
+	if err != nil {
+		logger.Panic(err)
+		return
+	}
+	//Count total and setup progress
+	total, err := client.Count(viper.GetString("elastic_index")).Type("file").Do(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	bar := pb.StartNew(int(total))
+
+	hits := make(chan json.RawMessage)
+	g, ctx := errgroup.WithContext(context.Background())
+	g.Go(func() error {
+		defer close(hits)
+		scroll := client.
+			Scroll(viper.GetString("elastic_index")).
+			Type("file").
+			Size(1000).
+			FetchSourceContext(elastic.NewFetchSourceContext(true).Include("path"))
+		for {
+			results, err := scroll.Do(context.Background())
+			if err == io.EOF {
+				return nil // all results retrieved
+			}
+			if err != nil {
+				return err // something went wrong
+			}
+
+			// Send the hits to the hits channel
+			for _, hit := range results.Hits.Hits {
+				select {
+				case hits <- *hit.Source:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		}
+	})
+
+	for i := 0; i < 10; i++ {
+		g.Go(func() error {
+			var filesBuf []string
+
+			for hit := range hits {
+				//var p fileIdx
+				var p map[string]string
+				err := json.Unmarshal(hit, &p)
+				if err != nil {
+					return err
+				}
+
+				if len(filesBuf) == FileChunks {
+					msgTask := task{
+						"clearscan",
+						filesBuf}
+
+					taskEnc, err := encodeTask(msgTask)
+					if err != nil {
+						logger.Error("Error encoding clearscan message: ", err)
+						continue
+					}
+
+					msg := message{taskEnc, "file." + dataStore.GetId()}
+					pubChan <- msg
+				}
+
+				bar.Increment()
+
+				// Terminate early?
+				select {
+				default:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return nil
+		})
+	}
+
+	// Check whether any goroutines failed.
+	if err := g.Wait(); err != nil {
+		panic(err)
+	}
+
+	// Done.
+	bar.FinishPrint("Done")
+
 }
