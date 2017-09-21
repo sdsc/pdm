@@ -16,9 +16,9 @@ import (
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
-	"gopkg.in/olivere/elastic.v5"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/cheggaaa/pb.v1"
+	"gopkg.in/olivere/elastic.v5"
 )
 
 func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
@@ -216,9 +216,15 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				src.Close()
 				dest.Close()
 
-				toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
-				toDataStore.Chmod(filepath, sourceFileMeta.Mode())
-				toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
+				if err = toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid)); err != nil {
+					logger.Error(err.Error())
+				}
+				if err = toDataStore.Chmod(filepath, sourceFileMeta.Mode()); err != nil {
+					logger.Error(err.Error())
+				}
+				if err = toDataStore.Chtimes(filepath, sourceAtime, sourceMtime); err != nil {
+					logger.Error(err.Error())
+				}
 
 				atomic.AddUint64(&FilesCopiedCount, 1)
 				atomic.AddUint64(&BytesCount, uint64(bytesCopied))
@@ -228,39 +234,28 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				// shouldn't happen
 				logger.Error("File ", filepath, " appeared to be a folder")
 			case mode&os.ModeSymlink != 0:
-				sourceMtime := sourceFileMeta.ModTime()
-				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
-				sourceAtime := getAtime(sourceStat)
-				if destFileMeta, err := toDataStore.GetMetadata(filepath); err == nil { // the dest link exists
-					destMtime := destFileMeta.ModTime()
-
-					if sourceFileMeta.Mode() == destFileMeta.Mode() &&
-						sourceMtime == destMtime {
-						atomic.AddUint64(&FilesSkippedCount, 1)
-						continue
-					}
-					//logger.Debugf("Removing symlink %s", filepath)
-					err = toDataStore.Remove(filepath)
-					if err != nil {
-						logger.Error("Error removing symlink ", filepath, ": ", err)
-						continue
-					}
-				}
-
 				linkTarget, err := fromDataStore.Readlink(filepath)
 				if err != nil {
 					logger.Error("Error reading symlink ", filepath, ": ", err)
 					continue
 				}
 
-				err = toDataStore.Symlink(linkTarget, filepath)
-				if err != nil {
-					logger.Error("Error seting symlink ", filepath, ": ", err)
-					continue
+				if _, err = toDataStore.GetMetadata(filepath); err == nil { // the dest link exists
+					if dlinkTarget, err := toDataStore.Readlink(filepath); err == nil && dlinkTarget == linkTarget {
+						atomic.AddUint64(&FilesCopiedCount, 1)
+						continue
+					}
+
+					if err = toDataStore.Remove(filepath); err != nil {
+						logger.Error("Error removing symlink ", filepath, ": ", err)
+						continue
+					}
 				}
 
-				toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
-				toDataStore.Chtimes(filepath, sourceAtime, sourceMtime)
+				if err = toDataStore.Symlink(linkTarget, filepath); err != nil {
+					logger.Error("Error setting symlink ", filepath, ": ", err)
+					continue
+				}
 
 				atomic.AddUint64(&FilesCopiedCount, 1)
 
@@ -394,7 +389,6 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			} else {
 				toDataStore.Mkdir(dirPath, sourceDirMeta.Mode())
-				toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
 				toDataStore.Lchown(dirPath, int(sourceDirMeta.Sys().(*syscall.Stat_t).Uid), int(sourceDirMeta.Sys().(*syscall.Stat_t).Gid))
 			}
 		}
