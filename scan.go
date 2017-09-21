@@ -18,6 +18,15 @@ const mapping = `
     "mappings": {
       "file": {
         "properties": {
+          "path": {
+            "type": "keyword"
+          },
+          "user": {
+            "type": "keyword"
+          },
+          "group": {
+            "type": "keyword"
+          },
           "size": {
             "type": "long"
           },
@@ -34,7 +43,7 @@ const mapping = `
       }
     },
     "settings": {
-        "number_of_shards": "5",
+        "number_of_shards": "10",
         "number_of_replicas": "0"
     }
 }
