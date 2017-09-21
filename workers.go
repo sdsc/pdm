@@ -349,11 +349,11 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			if destDirMeta, err := toDataStore.GetMetadata(dirPath); err == nil { // the dest folder exists
 				sourceDirStat := sourceDirMeta.Sys().(*syscall.Stat_t)
 				sourceDirUid := int(sourceDirStat.Uid)
-				sourceDirGid := int(sourceDirStat.Uid)
+				sourceDirGid := int(sourceDirStat.Gid)
 
 				destDirStat := destDirMeta.Sys().(*syscall.Stat_t)
 				destDirUid := int(destDirStat.Uid)
-				destDirGid := int(destDirStat.Uid)
+				destDirGid := int(destDirStat.Gid)
 
 				if destDirMeta.Mode() != sourceDirMeta.Mode() {
 					toDataStore.Chmod(dirPath, sourceDirMeta.Mode())
