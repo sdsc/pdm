@@ -180,7 +180,7 @@ func (l LustreDatastore) Create(filePath string, meta os.FileInfo) (io.WriteClos
 			return nil, err
 		}
 	}
-	return os.OpenFile(path.Join(l.mountPath, filePath), os.O_RDWR|os.O_TRUNC, meta.Mode())
+	return os.OpenFile(path.Join(l.mountPath, filePath), os.O_CREATE|os.O_RDWR|os.O_TRUNC, meta.Mode())
 }
 
 func (l LustreDatastore) Lchown(filePath string, uid, gid int) error {
