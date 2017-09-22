@@ -257,6 +257,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					continue
 				}
 
+				toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid))
+
 				atomic.AddUint64(&FilesCopiedCount, 1)
 
 			case mode&os.ModeNamedPipe != 0:
