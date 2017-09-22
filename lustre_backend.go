@@ -179,9 +179,8 @@ func (l LustreDatastore) Create(filePath string, meta os.FileInfo) (io.WriteClos
 			logger.Errorf("Error creating striped file: %v", err)
 			return nil, err
 		}
-		return os.OpenFile(path.Join(l.mountPath, filePath), os.O_RDWR|os.O_TRUNC, 0666)
 	}
-	return os.Create(path.Join(l.mountPath, filePath))
+	return os.OpenFile(path.Join(l.mountPath, filePath), os.O_RDWR|os.O_TRUNC, meta.Mode())
 }
 
 func (l LustreDatastore) Lchown(filePath string, uid, gid int) error {
@@ -234,7 +233,6 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 		}
 		ran = true
 	}
-
 
 	go func(outchan chan []string) {
 		defer close(outchan)
