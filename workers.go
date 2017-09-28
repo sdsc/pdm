@@ -623,6 +623,10 @@ func getElasticFiles(dataStore storage_backend) {
 					return err
 				}
 
+				filesBuf = append(filesBuf, p["path"])
+
+				logger.Debug("Added %s", p["path"])
+
 				if len(filesBuf) == FileChunks {
 					msgTask := task{
 						"clearscan",
@@ -636,6 +640,7 @@ func getElasticFiles(dataStore storage_backend) {
 
 					msg := message{taskEnc, "file." + dataStore.GetId()}
 					pubChan <- msg
+					filesBuf = filesBuf[:0]
 				}
 
 				bar.Increment()
@@ -647,6 +652,21 @@ func getElasticFiles(dataStore storage_backend) {
 					return ctx.Err()
 				}
 			}
+
+			if len(filesBuf) > 0 {
+				msgTask := task{
+					"clearscan",
+					filesBuf}
+
+				taskEnc, err := encodeTask(msgTask)
+				if err != nil {
+					logger.Error("Error encoding clearscan message: ", err)
+				}
+
+				msg := message{taskEnc, "file." + dataStore.GetId()}
+				pubChan <- msg
+			}
+
 			return nil
 		})
 	}
