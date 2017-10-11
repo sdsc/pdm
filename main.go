@@ -744,7 +744,7 @@ func main() {
 
 		workersWg.Wait()
 
-		getElasticFiles(dataBackends[*fsScanParam])
+		getElasticFiles(dataBackends[*fsClearScanParam])
 
 	case monitor.FullCommand():
 		if viper.IsSet("debug") && viper.GetBool("debug") {

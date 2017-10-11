@@ -336,7 +336,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			if err != nil {
 				if os.IsNotExist(err) {
 					logger.Debugf("Error reading file %s metadata, not exists, removing from index: %s", filepath, err)
-					elasticClient.DeleteByQuery(viper.GetString("elastic_index")).Query(elastic.NewMatchQuery("path", filepath)).Do(context.Background())
+					_, err = elasticClient.DeleteByQuery(viper.GetString("elastic_index")).Query(elastic.NewMatchQuery("path", filepath)).Do(context.Background())
 					atomic.AddUint64(&FilesRemovedCount, 1)
 					if err != nil {
 						logger.Error("Error clearing target file ", filepath, ": ", err)

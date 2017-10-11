@@ -13,6 +13,16 @@ debug = true
 # Elasticsearch files index name
 # elastic_index = idx
 
+# Send workers stats to monitoring (in seconds)
+monitor_interval = 10
+
+copy = true
+scan = true
+scan_update = true
+
+file_prefetch = 256
+dir_prefetch = 36
+
 [rabbitmq]
 connect_string = "amqp://guest:guest@localhost:5672/"
 

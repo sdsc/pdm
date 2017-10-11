@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+	"sync/atomic"
 	//"runtime"
 	//"github.com/intel-hpdd/go-lustre/llapi"
 	"path"
@@ -144,6 +145,7 @@ func rmDir(absPath string) error {
 		defer wg.Done()
 		for file := range filesChan {
 			os.Remove(file)
+			atomic.AddUint64(&FilesRemovedCount, 1)
 		}
 	}()
 
