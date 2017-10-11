@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
-	"sync"
-	"time"
 )
 
 type monMessage struct {
@@ -96,22 +97,24 @@ func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery,
 						}
 					}
 				}
-				for k := range viper.Get("datasource").(map[string]interface{}) {
-					routingKey := fmt.Sprintf("%s", k)
+				if viper.GetBool("scan") || viper.GetBool("scan_update") {
+					for k := range viper.Get("datasource").(map[string]interface{}) {
+						routingKey := fmt.Sprintf("%s", k)
 
-					inspectQueue, err := ch.QueueInspect("file." + routingKey)
-					if err != nil {
-						logger.Errorf("Cannot create queue %s: %v", "file."+routingKey, err)
-						return
-					}
-					QueueMessagesGauge.WithLabelValues(routingKey, "file").Set(float64(inspectQueue.Messages))
+						inspectQueue, err := ch.QueueInspect("file." + routingKey)
+						if err != nil {
+							logger.Errorf("Cannot create queue %s: %v", "file."+routingKey, err)
+							return
+						}
+						QueueMessagesGauge.WithLabelValues(routingKey, "file").Set(float64(inspectQueue.Messages))
 
-					inspectQueue, err = ch.QueueInspect("dir." + routingKey)
-					if err != nil {
-						logger.Errorf("Cannot create queue %s: %v", "dir."+routingKey, err)
-						return
+						inspectQueue, err = ch.QueueInspect("dir." + routingKey)
+						if err != nil {
+							logger.Errorf("Cannot create queue %s: %v", "dir."+routingKey, err)
+							return
+						}
+						QueueMessagesGauge.WithLabelValues(routingKey, "dir").Set(float64(inspectQueue.Messages))
 					}
-					QueueMessagesGauge.WithLabelValues(routingKey, "dir").Set(float64(inspectQueue.Messages))
 				}
 			}
 		}()
