@@ -12,6 +12,7 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// Variables for general copy statistics
 type monMessage struct {
 	DataSource       string
 	Node             string
@@ -59,6 +60,41 @@ var (
 		Help: "Number of messages in the queue",
 	},
 		[]string{"id", "type"})
+)
+
+
+// Variables for lustre log listener
+var (
+	LLFilesCreatedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_files_created_number",
+		Help: "Number of files created",
+	},
+		[]string{"group", "user", "datasource"})
+	LLFilesRemovedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_files_removed_number",
+		Help: "Number of files removed",
+	},
+		[]string{"group", "user", "datasource"})
+	LLFoldersCreatedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_folders_created_number",
+		Help: "Number of folders created",
+	},
+		[]string{"group", "user", "datasource"})
+	LLFoldersRemovedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_folders_removed_number",
+		Help: "Number of folders removed",
+	},
+		[]string{"group", "user", "datasource"})
+	LLAttrChangedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_attr_changed_number",
+		Help: "Number of files with attributes changed",
+	},
+		[]string{"group", "user", "datasource"})
+	LLMtimeChangedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_mtime_changed_number",
+		Help: "Number of files with mtime changed",
+	},
+		[]string{"group", "user", "datasource"})
 )
 
 func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery, topic string) {

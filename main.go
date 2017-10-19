@@ -31,6 +31,7 @@ import (
 
 type storage_backend interface {
 	GetId() string
+	GetMountPath() string
 	GetSkipFilesNewer() int
 	GetSkipFilesOlder() int
 	GetLocalFilepath(filePath string) string
@@ -467,6 +468,7 @@ var (
 	fsClearScanParam             = clearScanCommand.Arg("fs", "The fs mount ID").Required().String()
 
 	listenLogCommand = app.Command("listen", "Listen to the lustre log")
+	fsListenParam    = listenLogCommand.Arg("fs", "The fs mount ID").Required().String()
 	listenMdtParam   = listenLogCommand.Arg("mdt", "The MDT ID and user in the form lustre-MDT0000:cl1").Required().Strings()
 
 	monitor = app.Command("monitor", "Start monitoring daemon")
@@ -772,10 +774,42 @@ func main() {
 		logger.Fatal(http.ListenAndServe(":8082", nil))
 
 	case listenLogCommand.FullCommand():
-		var workersWg sync.WaitGroup
-		workersWg.Add(1)
-		listenLog(&workersWg)
-		workersWg.Wait()
+		readWorkerConfig()
+		if viper.IsSet("elastic_url") {
+			initElasticLog()
+		}
+
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			logger.Level = logrus.DebugLevel
+		}
+		for k := range viper.Get("datasource").(map[string]interface{}) {
+			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
+			case "lustre":
+				dataBackends[k] = LustreDatastore{
+					k,
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+			case "posix":
+				dataBackends[k] = PosixDatastore{
+					k,
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+			}
+		}
+		listenLog()
+		prometheus.MustRegister(LLFilesCreatedCounter)
+		prometheus.MustRegister(LLFilesRemovedCounter)
+		prometheus.MustRegister(LLFoldersCreatedCounter)
+		prometheus.MustRegister(LLFoldersRemovedCounter)
+		prometheus.MustRegister(LLAttrChangedCounter)
+		prometheus.MustRegister(LLMtimeChangedCounter)
+
+		http.Handle("/metrics", promhttp.Handler())
+		logger.Fatal(http.ListenAndServe(":8083", nil))
 	}
 
 	<-ctx.Done()

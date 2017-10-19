@@ -30,6 +30,10 @@ func (l LustreDatastore) GetId() string {
 	return l.id
 }
 
+func (l LustreDatastore) GetMountPath() string {
+	return l.mountPath
+}
+
 func (l LustreDatastore) GetSkipFilesNewer() int {
 	return l.skipFilesNewer
 }

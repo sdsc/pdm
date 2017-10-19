@@ -22,6 +22,10 @@ func (l PosixDatastore) GetId() string {
 	return l.id
 }
 
+func (l PosixDatastore) GetMountPath() string {
+	return l.mountPath
+}
+
 func (l PosixDatastore) GetSkipFilesNewer() int {
 	return l.skipFilesNewer
 }
