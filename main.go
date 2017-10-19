@@ -469,6 +469,7 @@ var (
 
 	listenLogCommand = app.Command("listen", "Listen to the lustre log")
 	fsListenParam    = listenLogCommand.Arg("fs", "The fs mount ID").Required().String()
+	portParam        = listenLogCommand.Arg("port", "The metrics prometheus port").Required().Int()
 	listenMdtParam   = listenLogCommand.Arg("mdt", "The MDT ID and user in the form lustre-MDT0000:cl1").Required().Strings()
 
 	monitor = app.Command("monitor", "Start monitoring daemon")
@@ -809,7 +810,7 @@ func main() {
 		prometheus.MustRegister(LLMtimeChangedCounter)
 
 		http.Handle("/metrics", promhttp.Handler())
-		logger.Fatal(http.ListenAndServe(":8083", nil))
+		logger.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *portParam), nil))
 	}
 
 	<-ctx.Done()
