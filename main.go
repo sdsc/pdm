@@ -466,6 +466,9 @@ var (
 	rabbitmqServerClearScanParam = clearScanCommand.Flag("rabbitmq", "RabbitMQ connect string.  (Can also be set in PDM_RABBITMQ environmental variable)").String()
 	fsClearScanParam             = clearScanCommand.Arg("fs", "The fs mount ID").Required().String()
 
+	listenLogCommand = app.Command("listen", "Listen to the lustre log")
+	listenMdtParam   = listenLogCommand.Arg("mdt", "The MDT ID and user in the form lustre-MDT0000:cl1").Required().Strings()
+
 	monitor = app.Command("monitor", "Start monitoring daemon")
 )
 
@@ -768,6 +771,11 @@ func main() {
 		http.Handle("/metrics", promhttp.Handler())
 		logger.Fatal(http.ListenAndServe(":8082", nil))
 
+	case listenLogCommand.FullCommand():
+		var workersWg sync.WaitGroup
+		workersWg.Add(1)
+		listenLog(&workersWg)
+		workersWg.Wait()
 	}
 
 	<-ctx.Done()
