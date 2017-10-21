@@ -801,13 +801,18 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
 			}
 		}
+
 		listenLog()
 		prometheus.MustRegister(LLFilesCreatedCounter)
 		prometheus.MustRegister(LLFilesRemovedCounter)
 		prometheus.MustRegister(LLFoldersCreatedCounter)
 		prometheus.MustRegister(LLFoldersRemovedCounter)
 		prometheus.MustRegister(LLAttrChangedCounter)
+		prometheus.MustRegister(LLXAttrChangedCounter)
 		prometheus.MustRegister(LLMtimeChangedCounter)
+		prometheus.MustRegister(LLCacheHitsCounter)
+		prometheus.MustRegister(LLCacheMissesCounter)
+		prometheus.MustRegister(LLQueueLengthGauge)
 
 		http.Handle("/metrics", promhttp.Handler())
 		logger.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *portParam), nil))

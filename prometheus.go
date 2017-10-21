@@ -62,7 +62,6 @@ var (
 		[]string{"id", "type"})
 )
 
-
 // Variables for lustre log listener
 var (
 	LLFilesCreatedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -90,11 +89,31 @@ var (
 		Help: "Number of files with attributes changed",
 	},
 		[]string{"group", "user", "datasource"})
+	LLXAttrChangedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_xattr_changed_number",
+		Help: "Number of files with x attributes changed",
+	},
+		[]string{"group", "user", "datasource"})
 	LLMtimeChangedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_mtime_changed_number",
 		Help: "Number of files with mtime changed",
 	},
 		[]string{"group", "user", "datasource"})
+	LLCacheHitsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_cache_hits_number",
+		Help: "Number of fid cache hits",
+	},
+		[]string{"datasource"})
+	LLCacheMissesCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_cache_misses_number",
+		Help: "Number of fid cache misses",
+	},
+		[]string{"datasource"})
+	LLQueueLengthGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ll_queue_length_number",
+		Help: "Number of queued events",
+	},
+		[]string{"datasource"})
 )
 
 func subscribeMon(sessions chan chan session, mon_messages chan<- amqp.Delivery, topic string) {

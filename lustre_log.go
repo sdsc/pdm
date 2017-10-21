@@ -2,13 +2,14 @@ package main
 
 import (
 	"bufio"
+	"fmt"
+	"github.com/patrickmn/go-cache"
 	"io/ioutil"
 	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
-	"fmt"
 )
 
 type LustreEvent struct {
@@ -18,8 +19,16 @@ type LustreEvent struct {
 	Parent string
 }
 
+var c = cache.New(5*time.Minute, 10*time.Minute)
+
 func listenLog() {
-	eventsChan := make(chan string, 10000)
+	eventsChan := make(chan string, 100000)
+
+	go func() {
+		for range time.NewTicker(5 * time.Second).C {
+			LLQueueLengthGauge.WithLabelValues(*fsListenParam).Set(float64(len(eventsChan)))
+		}
+	}()
 
 	for _, mdtstr := range *listenMdtParam {
 		mdt := strings.Split(mdtstr, ":")[0]
@@ -62,7 +71,7 @@ func listenLog() {
 				}
 
 				if lastID == "" {
-					time.Sleep(5 * time.Second)
+					time.Sleep(1 * time.Second)
 				} else {
 					if _, err = exec.Command("lfs", "changelog_clear", mdt, user, lastID).Output(); err != nil {
 						log.Println(err.Error())
@@ -72,7 +81,7 @@ func listenLog() {
 		}(mdt, user)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 2; i++ {
 		go func() {
 			for evtStr := range eventsChan {
 				evtTokens := strings.Split(evtStr, " ")
@@ -104,13 +113,19 @@ func listenLog() {
 				case "14SATTR":
 					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
-						//logger.Errorf("Error getting fid of changed attr %s: %s", evtTokens[5][3 : len(evtTokens[5])-1], err.Error())
+						logger.Errorf("Error getting fid of changed attr %s: %s", evtTokens[5][3 : len(evtTokens[5])-1], err.Error())
 					}
 					LLAttrChangedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+				case "15XATTR":
+					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					if err != nil {
+						logger.Errorf("Error getting fid of changed attr %s: %s", evtTokens[5][3 : len(evtTokens[5])-1], err.Error())
+					}
+					LLXAttrChangedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
 				case "17MTIME":
 					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
-						logger.Errorf("Error getting fid of mtime %s: %s", evtTokens[5][3 : len(evtTokens[5])-1], err.Error())
+						logger.Errorf("Error getting fid of mtime %s: %s", evtTokens[5][3:len(evtTokens[5])-1], err.Error())
 					}
 					LLMtimeChangedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
 				default:
@@ -124,17 +139,26 @@ func listenLog() {
 
 func getOwner(fid string) (string, string, error) {
 
-	fs := dataBackends[*fsListenParam]
+	var rel string
 
-	pathB, err := exec.Command("lfs", "fid2path", fs.GetMountPath(), fid).Output()
-	if err != nil {
-		return "unknown", "unknown", err
-	}
+	if relVal, found := c.Get(fid); found {
+		rel = relVal.(string)
+		LLCacheHitsCounter.WithLabelValues(*fsListenParam).Inc()
+	} else {
+		LLCacheMissesCounter.WithLabelValues(*fsListenParam).Inc()
+		fs := dataBackends[*fsListenParam]
 
-	path := string(pathB)
-	rel, err := filepath.Rel(fs.GetMountPath(), path)
-	if err != nil {
-		return "", "", err
+		pathB, err := exec.Command("lfs", "fid2path", fs.GetMountPath(), fid).Output()
+		if err != nil {
+			return "unknown", "unknown", err
+		}
+
+		path := string(pathB)
+		rel, err = filepath.Rel(fs.GetMountPath(), path)
+		if err != nil {
+			return "", "", err
+		}
+		c.Set(fid, rel, cache.DefaultExpiration)
 	}
 
 	if len(strings.Split(rel, "/")) < 2 {
