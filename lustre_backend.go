@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +26,7 @@ type LustreDatastore struct {
 	canWrite       bool
 	skipFilesNewer int
 	skipFilesOlder int
+	MDSNum         int
 }
 
 func (l LustreDatastore) GetId() string {
@@ -198,7 +201,18 @@ func (l LustreDatastore) Chmod(filePath string, perm os.FileMode) error {
 }
 
 func (l LustreDatastore) Mkdir(dirPath string, perm os.FileMode) error {
-	return os.Mkdir(path.Join(l.mountPath, dirPath), perm)
+	if l.MDSNum == 0 || path.Dir(dirPath) != "." {
+		return os.Mkdir(path.Join(l.mountPath, dirPath), perm)
+	} else {
+		cmdName := "/usr/bin/lfs"
+		cmdArgs := []string{"setdirstripe", "-i", strconv.Itoa(rand.Intn(l.MDSNum)), path.Join(l.mountPath, dirPath)}
+		_, err := exec.Command(cmdName, cmdArgs...).Output()
+		if err != nil {
+			return err
+		}
+		err = os.Chmod(path.Join(l.mountPath, dirPath), perm)
+		return err
+	}
 }
 
 func (l LustreDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Time) error {

@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"path"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -24,9 +23,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/olivere/elastic.v5"
 	"gopkg.in/sohlich/elogrus.v2"
+
+	"math/rand"
 )
 
 type storage_backend interface {
@@ -476,6 +477,7 @@ var (
 )
 
 func main() {
+	rand.Seed(time.Now().UTC().UnixNano())
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case worker.FullCommand():
@@ -508,7 +510,8 @@ func main() {
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k))}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
 					k,
@@ -530,8 +533,8 @@ func main() {
 						if err := syscall.Stat(mountpoint, &stat1); err != nil {
 							logger.Fatalf("Error checking mountpoint %s: %s", mountpoint, err)
 						}
-						if err := syscall.Stat(path.Dir(mountpoint), &stat2); err != nil {
-							logger.Fatalf("Error checking mountpoint %s: %s", path.Dir(mountpoint), err)
+						if err := syscall.Stat("/", &stat2); err != nil {
+							logger.Fatalf("Error checking mountpoint /: %s", err)
 						}
 						if stat1.Dev == stat2.Dev {
 							logger.Fatalf("Filesystem %s is not mounted. Exiting", mountpoint)
@@ -728,7 +731,8 @@ func main() {
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k))}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
 					k,
@@ -791,7 +795,8 @@ func main() {
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k))}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
 					k,

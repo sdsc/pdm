@@ -54,3 +54,6 @@ skip_files_newer_minutes=0
 
 # skip files older than N seconds (off if 0)
 skip_files_older_minutes=0
+
+# set random MDS striping for top-level folders on 2 MDS
+mds = 2
