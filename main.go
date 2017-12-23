@@ -473,7 +473,8 @@ var (
 	portParam        = listenLogCommand.Arg("port", "The metrics prometheus port").Required().Int()
 	listenMdtParam   = listenLogCommand.Arg("mdt", "The MDT ID and user in the form lustre-MDT0000:cl1").Required().Strings()
 
-	monitor = app.Command("monitor", "Start monitoring daemon")
+	monitor          = app.Command("monitor", "Start monitoring daemon")
+	monitorPortParam = monitor.Arg("port", "The metrics prometheus port").Required().Int()
 )
 
 func main() {
@@ -776,7 +777,7 @@ func main() {
 		}()
 
 		http.Handle("/metrics", promhttp.Handler())
-		logger.Fatal(http.ListenAndServe(":8082", nil))
+		logger.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *monitorPortParam), nil))
 
 	case listenLogCommand.FullCommand():
 		readWorkerConfig()
