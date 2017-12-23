@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"io"
-	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
@@ -205,7 +204,8 @@ func (l LustreDatastore) Mkdir(dirPath string, perm os.FileMode) error {
 		return os.Mkdir(path.Join(l.mountPath, dirPath), perm)
 	} else {
 		cmdName := "/usr/bin/lfs"
-		cmdArgs := []string{"setdirstripe", "-i", strconv.Itoa(rand.Intn(l.MDSNum)), path.Join(l.mountPath, dirPath)}
+		// cmdArgs := []string{"setdirstripe", "-i", strconv.Itoa(rand.Intn(l.MDSNum)), path.Join(l.mountPath, dirPath)}
+		cmdArgs := []string{"setdirstripe", "-i", strconv.Itoa(l.MDSNum), path.Join(l.mountPath, dirPath)}
 		_, err := exec.Command(cmdName, cmdArgs...).Output()
 		if err != nil {
 			return err
