@@ -263,7 +263,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				if folder != curDir {
 					rel, err := filepath.Rel(l.mountPath, folder)
 					if err != nil {
-						logger.Errorf("Error resolving folder %s: %v", folder, err)
+						logger.Errorf("Error resolving folder %s in %s: %v", folder, curDir, err)
 						continue
 					}
 					outchan <- []string{rel}
@@ -280,7 +280,7 @@ func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string,
 				file := scanner.Text()
 				rel, err := filepath.Rel(l.mountPath, file)
 				if err != nil {
-					logger.Errorf("Error resolving file %s: %v", file, err)
+					logger.Errorf("Error resolving file %s in %s: %v", file, curDir, err)
 					continue
 				}
 
