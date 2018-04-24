@@ -16,6 +16,7 @@ type PosixDatastore struct {
 	canWrite       bool
 	skipFilesNewer int
 	skipFilesOlder int
+	skipPaths      []string
 }
 
 func (l PosixDatastore) GetId() string {
@@ -28,6 +29,10 @@ func (l PosixDatastore) GetMountPath() string {
 
 func (l PosixDatastore) GetSkipFilesNewer() int {
 	return l.skipFilesNewer
+}
+
+func (l PosixDatastore) GetSkipPaths() []string {
+	return l.skipPaths
 }
 
 func (l PosixDatastore) GetSkipFilesOlder() int {

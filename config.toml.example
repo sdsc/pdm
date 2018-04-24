@@ -35,6 +35,7 @@ mount = false
 write = true
 skip_files_newer_minutes=60
 skip_files_older_minutes=0
+skip_path=["user1/folder2/folder3"]
 
 [datasource.panda]
 # plugin to use (lustre/posix)

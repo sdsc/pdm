@@ -36,6 +36,7 @@ type storage_backend interface {
 	GetSkipFilesNewer() int
 	GetSkipFilesOlder() int
 	GetLocalFilepath(filePath string) string
+	GetSkipPaths() []string
 	GetMetadata(filePath string) (os.FileInfo, error)
 	Readlink(filePath string) (string, error)
 	Symlink(pointTo, filePath string) error
@@ -512,14 +513,18 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+				}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+				}
 			}
 			if viper.IsSet(fmt.Sprintf("datasource.%s.mount", k)) && viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)) {
 				checkMountpoints = append(checkMountpoints, viper.GetString(fmt.Sprintf("datasource.%s.path", k)))
@@ -733,14 +738,18 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+				}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+				}
 			}
 		}
 
@@ -797,14 +806,18 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+				}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
 					k,
 					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k))}
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+				}
 			}
 		}
 

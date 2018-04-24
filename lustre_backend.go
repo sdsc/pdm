@@ -26,6 +26,7 @@ type LustreDatastore struct {
 	skipFilesNewer int
 	skipFilesOlder int
 	MDSNum         int
+	skipPaths      []string
 }
 
 func (l LustreDatastore) GetId() string {
@@ -34,6 +35,10 @@ func (l LustreDatastore) GetId() string {
 
 func (l LustreDatastore) GetMountPath() string {
 	return l.mountPath
+}
+
+func (l LustreDatastore) GetSkipPaths() []string {
+	return l.skipPaths
 }
 
 func (l LustreDatastore) GetSkipFilesNewer() int {

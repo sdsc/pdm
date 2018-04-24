@@ -92,6 +92,14 @@ func processFoldersStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
 }
 
 func processFiles(fromDataStore storage_backend, toDataStore storage_backend, taskStruct task) {
+
+	for _, ignorePath := range fromDataStore.GetSkipPaths() {
+		if strings.HasPrefix(taskStruct.ItemPath[0], ignorePath) {
+			logger.Errorf("Ignoring the configured ignore path %s", taskStruct.ItemPath[0])
+			return
+		}
+	}
+
 	switch taskStruct.Action {
 	case "copy":
 		var indexFiles []string
@@ -116,7 +124,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		}
 
 		for _, filepath := range taskStruct.ItemPath {
-			//logger.Debugf("Processing %s", filepath)
+			logger.Debugf("Processing %s", filepath)
 			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source file
@@ -355,6 +363,13 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 	dirPath := taskStruct.ItemPath[0]
 
 	defer atomic.AddUint64(&FoldersCopiedCount, 1)
+
+	for _, ignorePath := range fromDataStore.GetSkipPaths() {
+		if strings.HasPrefix(dirPath, ignorePath) {
+			logger.Errorf("Ignoring the configured ignore path %s", dirPath)
+			return nil
+		}
+	}
 
 	//logger.Debugf("Processing folder %s", dirPath)
 	switch taskStruct.Action {
