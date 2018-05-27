@@ -26,11 +26,16 @@ type LustreDatastore struct {
 	skipFilesNewer int
 	skipFilesOlder int
 	MDSNum         int
+	elasticIndex   string
 	skipPaths      []string
 }
 
 func (l LustreDatastore) GetId() string {
 	return l.id
+}
+
+func (l LustreDatastore) GetElasticIndex() string {
+	return l.elasticIndex
 }
 
 func (l LustreDatastore) GetMountPath() string {

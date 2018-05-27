@@ -17,10 +17,15 @@ type PosixDatastore struct {
 	skipFilesNewer int
 	skipFilesOlder int
 	skipPaths      []string
+	elasticIndex   string
 }
 
 func (l PosixDatastore) GetId() string {
 	return l.id
+}
+
+func (l PosixDatastore) GetElasticIndex() string {
+	return l.elasticIndex
 }
 
 func (l PosixDatastore) GetMountPath() string {

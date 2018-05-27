@@ -158,7 +158,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				if viper.GetBool("scan_update") {
 					res, err := elasticClient.
 						Search().
-						Index(viper.GetString("elastic_index")).
+						Index(fromDataStore.GetElasticIndex()).
 						Query(elastic.NewTermQuery("path", filepath)).
 						Type("file").
 						Do(context.Background())
@@ -325,7 +325,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				}
 				fileIndex := fileIdx{filepath, user, group, sourceFileMeta.Size(), fileType, sourceFileMeta.ModTime(), sourceAtime}
 				_, err = elasticClient.Index().
-					Index(viper.GetString("elastic_index")).
+					Index(fromDataStore.GetElasticIndex()).
 					Type("file").
 					BodyJson(fileIndex).
 					Do(context.Background())
@@ -344,7 +344,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			if err != nil {
 				if os.IsNotExist(err) {
 					logger.Debugf("Error reading file %s metadata, not exists, removing from index: %s", filepath, err)
-					_, err = elasticClient.DeleteByQuery(viper.GetString("elastic_index")).Query(elastic.NewMatchQuery("path", filepath)).Do(context.Background())
+					_, err = elasticClient.DeleteByQuery(fromDataStore.GetElasticIndex()).Query(elastic.NewMatchQuery("path", filepath)).Do(context.Background())
 					atomic.AddUint64(&FilesRemovedCount, 1)
 					if err != nil {
 						logger.Error("Error clearing target file ", filepath, ": ", err)
@@ -591,7 +591,7 @@ func getElasticFiles(dataStore storage_backend) {
 		return
 	}
 	//Count total and setup progress
-	total, err := client.Count(viper.GetString("elastic_index")).Type("file").Do(context.Background())
+	total, err := client.Count(dataStore.GetElasticIndex()).Type("file").Do(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -602,7 +602,7 @@ func getElasticFiles(dataStore storage_backend) {
 	g.Go(func() error {
 		defer close(hits)
 		scroll := client.
-			Scroll(viper.GetString("elastic_index")).
+			Scroll(dataStore.GetElasticIndex()).
 			Type("file").
 			Size(1000).
 			FetchSourceContext(elastic.NewFetchSourceContext(true).Include("path"))
