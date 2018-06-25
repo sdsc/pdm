@@ -176,7 +176,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 								indexFiles = append(indexFiles, filepath)
 							} else {
 								//logger.Debugf("File %s is in index", filepath)
-								if f.Size != sourceStat.Size || f.Mtime != sourceMtime {
+								if f.Size != sourceStat.Size || f.Mtime != sourceMtime || f.AllocSize != sourceStat.Blocks*512 {
 									logger.Debugf("File %s is %v, reindexing.", filepath, f)
 									indexFiles = append(indexFiles, filepath)
 								}
@@ -323,7 +323,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 						user = dirs[1]
 					}
 				}
-				fileIndex := fileIdx{filepath, user, group, sourceFileMeta.Size(), fileType, sourceFileMeta.ModTime(), sourceAtime}
+				fileIndex := fileIdx{filepath, user, group, sourceFileMeta.Size(), sourceStat.Blocks * 512, fileType, sourceFileMeta.ModTime(), sourceAtime}
 				_, err = elasticClient.Index().
 					Index(fromDataStore.GetElasticIndex()).
 					Type("file").

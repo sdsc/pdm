@@ -30,6 +30,9 @@ const mapping = `
           "size": {
             "type": "long"
           },
+          "alloc_size": {
+            "type": "long"
+          },
           "type": {
 			"type": "keyword"
           },

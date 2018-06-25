@@ -119,13 +119,14 @@ type task struct {
 }
 
 type fileIdx struct {
-	Path  string    `json:"path"`
-	User  string    `json:"user"`
-	Group string    `json:"group"`
-	Size  int64     `json:"size"`
-	Type  string    `json:"type"`
-	Mtime time.Time `json:"mtime,omitempty"`
-	Atime time.Time `json:"atime,omitempty"`
+	Path      string    `json:"path"`
+	User      string    `json:"user"`
+	Group     string    `json:"group"`
+	Size      int64     `json:"size"`
+	AllocSize int64     `json:"alloc_size"`
+	Type      string    `json:"type"`
+	Mtime     time.Time `json:"mtime,omitempty"`
+	Atime     time.Time `json:"atime,omitempty"`
 }
 
 type session struct {
