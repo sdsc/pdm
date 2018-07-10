@@ -38,6 +38,8 @@ type storage_backend interface {
 	GetLocalFilepath(filePath string) string
 	GetSkipPaths() []string
 	GetElasticIndex() string
+	IsRecogniseTypes() bool
+	IsNoGroup() bool
 	GetMetadata(filePath string) (os.FileInfo, error)
 	Readlink(filePath string) (string, error)
 	Symlink(pointTo, filePath string) error
@@ -425,12 +427,12 @@ func initElasticLog() {
 	logger.Out = ioutil.Discard
 
 	for _, dataBackend := range dataBackends {
-		logger.Debug("Initing the elastic log %s", dataBackend.GetId())
 		if exists, err := elasticClient.IndexExists(dataBackend.GetElasticIndex()).Do(context.Background()); err != nil {
 			logger.Error(err)
 		} else {
 			if !exists {
 				_, err = elasticClient.CreateIndex(dataBackend.GetElasticIndex()).BodyString(mapping).Do(context.Background())
+				logger.Info("Created index %s", dataBackend.GetElasticIndex())
 				if err != nil {
 					logger.Error(err)
 				}
@@ -487,14 +489,6 @@ func main() {
 	case worker.FullCommand():
 		readWorkerConfig()
 
-		if viper.IsSet("elastic_url") {
-			initElasticLog()
-		}
-
-		if viper.IsSet("debug") && viper.GetBool("debug") {
-			logger.Level = logrus.DebugLevel
-		}
-
 		var checkMountpoints []string
 
 		c := make(chan os.Signal, 1)
@@ -517,22 +511,22 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
 					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
-				}
-			case "posix":
-				dataBackends[k] = PosixDatastore{
-					k,
-					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
-					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
-					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 				}
 			}
 			if viper.IsSet(fmt.Sprintf("datasource.%s.mount", k)) && viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)) {
 				checkMountpoints = append(checkMountpoints, viper.GetString(fmt.Sprintf("datasource.%s.path", k)))
 			}
+		}
+
+		if viper.IsSet("elastic_url") {
+			initElasticLog()
+		}
+
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			logger.Level = logrus.DebugLevel
 		}
 
 		if len(checkMountpoints) > 0 {
@@ -744,17 +738,9 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
 					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
-				}
-			case "posix":
-				dataBackends[k] = PosixDatastore{
-					k,
-					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
-					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
-					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 				}
 			}
 		}
@@ -814,17 +800,9 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
 					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
-				}
-			case "posix":
-				dataBackends[k] = PosixDatastore{
-					k,
-					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
-					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
-					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
-					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 				}
 			}
 		}

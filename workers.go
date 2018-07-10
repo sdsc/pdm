@@ -310,10 +310,14 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			}
 
 			if sourceFileMeta.Mode().IsRegular() {
-				fileType, err := getFileType(fromDataStore.GetLocalFilepath(filepath))
-				if err != nil {
-					logger.Errorf("Error recognising %s metadata: %s", filepath, err)
-					continue
+				fileType := ""
+				if fromDataStore.IsRecogniseTypes() {
+					fileTypeCur, err := getFileType(fromDataStore.GetLocalFilepath(filepath))
+					if err != nil {
+						logger.Errorf("Error recognising %s metadata: %s", filepath, err)
+						continue
+					}
+					fileType = fileTypeCur
 				}
 
 				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
@@ -322,10 +326,16 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				// logger.Debugf("Scanning file %s of size %d and type %s", filepath, sourceFileMeta.Size(), fileType)
 				dirs := strings.Split(filepath, "/")
 				var user, group string
-				if len(dirs) > 0 {
-					group = dirs[0]
-					if len(dirs) > 1 {
+				if fromDataStore.IsNoGroup() {
+					if len(dirs) > 0 {
 						user = dirs[1]
+					}
+				} else {
+					if len(dirs) > 0 {
+						group = dirs[0]
+						if len(dirs) > 1 {
+							user = dirs[1]
+						}
 					}
 				}
 				fileIndex := fileIdx{filepath, user, group, sourceFileMeta.Size(), sourceStat.Blocks * 512, fileType, sourceFileMeta.ModTime(), sourceAtime}

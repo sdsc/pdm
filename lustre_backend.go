@@ -27,6 +27,8 @@ type LustreDatastore struct {
 	skipFilesOlder int
 	MDSNum         int
 	elasticIndex   string
+	recogniseTypes bool
+	noGroup        bool
 	skipPaths      []string
 }
 
@@ -48,6 +50,14 @@ func (l LustreDatastore) GetSkipPaths() []string {
 
 func (l LustreDatastore) GetSkipFilesNewer() int {
 	return l.skipFilesNewer
+}
+
+func (l LustreDatastore) IsRecogniseTypes() bool {
+	return l.recogniseTypes
+}
+
+func (l LustreDatastore) IsNoGroup() bool {
+	return l.noGroup
 }
 
 func (l LustreDatastore) GetSkipFilesOlder() int {
