@@ -328,7 +328,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				var user, group string
 				if fromDataStore.IsNoGroup() {
 					if len(dirs) > 0 {
-						user = dirs[1]
+						user = dirs[0]
 					}
 				} else {
 					if len(dirs) > 0 {
