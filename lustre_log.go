@@ -87,25 +87,25 @@ func listenLog() {
 				evtTokens := strings.Split(evtStr, " ")
 				switch evtTokens[1] {
 				case "01CREAT":
-					group, user, err := getOwner(evtTokens[6][3 : len(evtTokens[6])-1])
+					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of created file: %s", err.Error())
 					}
 					LLFilesCreatedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
 				case "02MKDIR":
-					group, user, err := getOwner(evtTokens[6][3 : len(evtTokens[6])-1])
+					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of created folder: %s", err.Error())
 					}
 					LLFoldersCreatedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
 				case "07RMDIR":
-					group, user, err := getOwner(evtTokens[6][3 : len(evtTokens[6])-1])
+					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of deleted folder: %s", err.Error())
 					}
 					LLFoldersRemovedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
 				case "06UNLNK":
-					group, user, err := getOwner(evtTokens[6][3 : len(evtTokens[6])-1])
+					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of deleted file: %s", err.Error())
 					}
