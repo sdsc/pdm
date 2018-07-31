@@ -18,7 +18,9 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/cheggaaa/pb.v1"
-	"gopkg.in/olivere/elastic.v5"
+	"gopkg.in/olivere/elastic.v6"
+	"crypto/md5"
+	"fmt"
 )
 
 func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
@@ -157,21 +159,27 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 				if viper.GetBool("scan_update") {
 					res, err := elasticClient.
-						Search().
+						Exists().
 						Index(fromDataStore.GetElasticIndex()).
-						Query(elastic.NewTermQuery("path", filepath)).
+						Id(fmt.Sprintf("%x", md5.Sum([]byte(filepath)))).
 						Type("file").
 						Do(context.Background())
 					if err != nil {
 						logger.Errorf("Error retrieving the document %s: %s", filepath, err.Error())
 					} else {
-						if res.Hits.TotalHits == 0 {
+						if !res {
 							indexFiles = append(indexFiles, filepath)
 							logger.Debugf("File %s is not in index")
 						} else {
+							res, err := elasticClient.
+								Get().
+								Index(fromDataStore.GetElasticIndex()).
+								Id(fmt.Sprintf("%x", md5.Sum([]byte(filepath)))).
+								Type("file").
+								Do(context.Background())
+
 							var f fileIdx
-							err := json.Unmarshal(*res.Hits.Hits[0].Source, &f)
-							if err != nil {
+							if err = json.Unmarshal(*res.Source, &f); err != nil {
 								logger.Errorf("Error deserializing the document %s: %s", filepath, err.Error())
 								indexFiles = append(indexFiles, filepath)
 							} else {
@@ -282,7 +290,12 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					err = toDataStore.Remove(filepath)
 
 					if viper.GetBool("scan_update") {
-						elasticClient.DeleteByQuery(fromDataStore.GetElasticIndex()).Query(elastic.NewMatchQuery("path", filepath)).Do(context.Background())
+						elasticClient.
+							Delete().
+							Index(fromDataStore.GetElasticIndex()).
+							Id(fmt.Sprintf("%x", md5.Sum([]byte(filepath)))).
+							Type("file").
+							Do(context.Background())
 					}
 
 					atomic.AddUint64(&FilesRemovedCount, 1)
@@ -341,6 +354,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				fileIndex := fileIdx{filepath, user, group, sourceFileMeta.Size(), sourceStat.Blocks * 512, fileType, sourceFileMeta.ModTime(), sourceAtime}
 				_, err = elasticClient.Index().
 					Index(fromDataStore.GetElasticIndex()).
+					Id(fmt.Sprintf("%x", md5.Sum([]byte(filepath)))).
 					Type("file").
 					BodyJson(fileIndex).
 					Do(context.Background())
@@ -359,7 +373,12 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			if err != nil {
 				if os.IsNotExist(err) {
 					logger.Debugf("Error reading file %s metadata, not exists, removing from index: %s", filepath, err)
-					_, err = elasticClient.DeleteByQuery(fromDataStore.GetElasticIndex()).Query(elastic.NewMatchQuery("path", filepath)).Do(context.Background())
+					elasticClient.
+						Delete().
+						Index(fromDataStore.GetElasticIndex()).
+						Id(fmt.Sprintf("%x", md5.Sum([]byte(filepath)))).
+						Type("file").
+						Do(context.Background())
 					atomic.AddUint64(&FilesRemovedCount, 1)
 					if err != nil {
 						logger.Error("Error clearing target file ", filepath, ": ", err)
