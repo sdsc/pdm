@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"crypto/md5"
+	"fmt"
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
@@ -19,8 +21,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/cheggaaa/pb.v1"
 	"gopkg.in/olivere/elastic.v6"
-	"crypto/md5"
-	"fmt"
 )
 
 func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
@@ -400,15 +400,15 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 	for _, ignorePath := range fromDataStore.GetSkipPaths() {
 		if strings.HasPrefix(dirPath, ignorePath) {
-			logger.Errorf("Ignoring the configured ignore path %s", dirPath)
+			logger.Debugf("Ignoring the configured ignore path %s", dirPath)
 			return nil
 		}
 	}
 
-	//logger.Debugf("Processing folder %s", dirPath)
+	logger.Debugf("Processing folder %s", dirPath)
 	switch taskStruct.Action {
 	case "copy":
-
+		logger.Debugf("Processing folder %s", dirPath)
 		if dirPath != "/" {
 			sourceDirMeta, err := fromDataStore.GetMetadata(dirPath)
 			if err != nil {
