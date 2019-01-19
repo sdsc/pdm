@@ -35,6 +35,7 @@ type storage_backend interface {
 	GetMountPath() string
 	GetSkipFilesNewer() int
 	GetSkipFilesOlder() int
+	GetPurgeFilesOlder() int
 	GetLocalFilepath(filePath string) string
 	GetSkipPaths() []string
 	GetElasticIndex() string
@@ -480,6 +481,11 @@ var (
 
 	monitor          = app.Command("monitor", "Start monitoring daemon")
 	monitorPortParam = monitor.Arg("port", "The metrics prometheus port").Required().Int()
+
+	purgeCommand             = app.Command("purge", "Purge old files")
+	rabbitmqServerPurgeParam = purgeCommand.Flag("rabbitmq", "RabbitMQ connect string.  (Can also be set in PDM_RABBITMQ environmental variable)").String()
+	fsPurgeParam             = purgeCommand.Arg("fs", "The fs mount ID").Required().String()
+	pathPurgeParam           = purgeCommand.Arg("path", "The path to scan, relative to the mount").Required().String()
 )
 
 func main() {
@@ -509,6 +515,7 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
@@ -716,6 +723,41 @@ func main() {
 		pub_chan <- msg
 		close(pub_chan)
 
+	case purgeCommand.FullCommand():
+		if viper.IsSet("debug") && viper.GetBool("debug") {
+			logger.Level = logrus.DebugLevel
+		}
+
+		rabbitmqServer := ""
+
+		if os.Getenv("PDM_RABBITMQ") != "" {
+			rabbitmqServer = os.Getenv("PDM_RABBITMQ")
+		} else if *rabbitmqServerScanParam != "" {
+			rabbitmqServer = *rabbitmqServerPurgeParam
+		}
+
+		pub_chan := make(chan message)
+
+		go func() {
+			publish(redial(ctx, rabbitmqServer), pub_chan, done)
+		}()
+
+		queuePrefix := "dir"
+
+		msgTask := task{
+			"purge",
+			[]string{*pathPurgeParam}}
+
+		taskEnc, err := encodeTask(msgTask)
+		if err != nil {
+			logger.Error("Error encoding message: ", err)
+			return
+		}
+
+		var msg = message{taskEnc, queuePrefix + "." + *fsPurgeParam}
+		pub_chan <- msg
+		close(pub_chan)
+
 	case clearScanCommand.FullCommand():
 		readWorkerConfig()
 
@@ -736,6 +778,7 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
@@ -798,6 +841,7 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),

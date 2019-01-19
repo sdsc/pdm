@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -212,6 +213,11 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					}
 				}
 
+				if sourceFileMeta.Size() > (1 << 30)*500 {
+					logger.Errorf("Skipping file >500GB %s", filepath)
+					continue
+				}
+
 				//logger.Debug("Started copying %s %d", filepath, worker)
 				src, err := fromDataStore.Open(filepath)
 				if err != nil {
@@ -307,6 +313,41 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				}
 			} else { // else the source file exists
 				atomic.AddUint64(&FilesSkippedCount, 1)
+			}
+		}
+	case "purge":
+		for _, filepath := range taskStruct.ItemPath {
+			logger.Debugf("Processing %s", filepath)
+			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
+			if err != nil {
+				if os.IsNotExist(err) { // the user already removed the source file
+					logger.Debugf("Error reading file %s metadata, not exists: %s", filepath, err)
+				} else {
+					logger.Errorf("Error reading file %s metadata: %s", filepath, err)
+				}
+				continue
+			}
+
+			skipped := 0
+
+			switch mode := sourceFileMeta.Mode(); {
+			case mode.IsRegular():
+				sourceMtime := sourceFileMeta.ModTime()
+
+				if fromDataStore.GetPurgeFilesOlder() > 0 && time.Since(sourceMtime).Hours()*24 > float64(fromDataStore.GetPurgeFilesOlder()) {
+					logger.Infof("Purging the file %s", filepath)
+					atomic.AddUint64(&FilesRemovedCount, 1)
+					continue
+				}
+
+				atomic.AddUint64(&FilesSkippedCount, 1)
+				skipped++;
+			}
+
+			if skipped == 0 { // dir is empty now
+				if len(strings.Split(filepath, string(os.PathSeparator))) > 3 {
+					logger.Infof("Purging now empty folder %s", path.Dir(filepath))
+				}
 			}
 		}
 	case "scan":

@@ -52,3 +52,6 @@ mds = 2
 
 elastic_index = "panda"
 recognise_types = true
+
+# purge files with MTime older than 30 days
+purge_files_older_days=30

@@ -25,6 +25,7 @@ type LustreDatastore struct {
 	canWrite       bool
 	skipFilesNewer int
 	skipFilesOlder int
+	purgeFilesOlder int
 	MDSNum         int
 	elasticIndex   string
 	recogniseTypes bool
@@ -50,6 +51,10 @@ func (l LustreDatastore) GetSkipPaths() []string {
 
 func (l LustreDatastore) GetSkipFilesNewer() int {
 	return l.skipFilesNewer
+}
+
+func (l LustreDatastore) GetPurgeFilesOlder() int {
+	return l.purgeFilesOlder
 }
 
 func (l LustreDatastore) IsRecogniseTypes() bool {
