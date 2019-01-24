@@ -578,7 +578,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			pubChan <- msg
 		}
 
-	case "scan":
+	case "scan", "purge":
 		if dirPath != "/" {
 			_, err := fromDataStore.GetMetadata(dirPath)
 			if err != nil {
@@ -600,7 +600,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		for dir := range dirsChan {
 			msgTask := task{
-				"scan",
+				taskStruct.Action,
 				dir}
 
 			taskEnc, err := encodeTask(msgTask)
@@ -621,7 +621,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 		for files := range filesChan {
 			msgTask := task{
-				"scan",
+				taskStruct.Action,
 				files}
 
 			taskEnc, err := encodeTask(msgTask)
