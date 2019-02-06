@@ -316,6 +316,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			}
 		}
 	case "purge":
+		skipped := 0
+
 		for _, filepath := range taskStruct.ItemPath {
 			logger.Debugf("Processing %s", filepath)
 			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
@@ -328,25 +330,34 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				continue
 			}
 
-			skipped := 0
-
 			switch mode := sourceFileMeta.Mode(); {
 			case mode.IsRegular():
-				sourceMtime := sourceFileMeta.ModTime()
+				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
+				sourceAtime := getAtime(sourceStat)
 
-				if fromDataStore.GetPurgeFilesOlder() > 0 && time.Since(sourceMtime).Hours()*24 > float64(fromDataStore.GetPurgeFilesOlder()) {
-					logger.Infof("Purging the file %s", filepath)
+				if fromDataStore.GetPurgeFilesOlder() > 0 && (time.Since(sourceAtime).Hours()/24.0 > float64(fromDataStore.GetPurgeFilesOlder())) {
+					//logger.Error(filepath)
+					if err := fromDataStore.Remove(filepath); err != nil {
+						logger.Errorf("Error deleting file %s: %s", filepath, err.Error())
+					}
 					atomic.AddUint64(&FilesRemovedCount, 1)
-					continue
+				} else {
+					atomic.AddUint64(&FilesSkippedCount, 1)
+					skipped++
 				}
-
-				atomic.AddUint64(&FilesSkippedCount, 1)
-				skipped++;
+			default: {
+				skipped++
+			}
 			}
 
-			if skipped == 0 { // dir is empty now
-				if len(strings.Split(filepath, string(os.PathSeparator))) > 3 {
-					logger.Infof("Purging now empty folder %s", path.Dir(filepath))
+		}
+
+		if skipped == 0 && len(taskStruct.ItemPath) > 0 { // dir is now empty
+			if len(strings.Split(taskStruct.ItemPath[0], string(os.PathSeparator))) > 3 {
+				//purgeQueue <- "Dir "+path.Dir(taskStruct.ItemPath[0])
+				//logger.Error("Dir "+path.Dir(taskStruct.ItemPath[0]))
+				if err := fromDataStore.Remove(path.Dir(taskStruct.ItemPath[0])); err != nil {
+					logger.Errorf("Error deleting folder %s: %s", path.Dir(taskStruct.ItemPath[0]), err.Error())
 				}
 			}
 		}

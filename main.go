@@ -488,12 +488,21 @@ var (
 	pathPurgeParam           = purgeCommand.Arg("path", "The path to scan, relative to the mount").Required().String()
 )
 
+var purgeQueue = make(chan string, 1000000)
+
 func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	switch kingpin.MustParse(app.Parse(os.Args[1:])) {
 	case worker.FullCommand():
 		readWorkerConfig()
+
+		go func() {
+			file, _ := os.OpenFile("/tmp/purge_queue", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0660);
+			for f := range purgeQueue {
+				file.WriteString(f+"\n")
+			}
+		}()
 
 		var checkMountpoints []string
 
