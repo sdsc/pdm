@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 	"sync"
@@ -15,7 +16,6 @@ import (
 
 	"crypto/md5"
 	"fmt"
-	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
@@ -201,9 +201,12 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					if sourceFileMeta.Size() == destFileMeta.Size() &&
 						sourceFileMeta.Mode() == destFileMeta.Mode() &&
 						sourceMtime == destMtime {
-						//logger.Debug("File %s hasn't been changed ", filepath)
-						atomic.AddUint64(&FilesSkippedCount, 1)
-						continue
+
+						if(float64(sourceFileMeta.Size())/float64(sourceStat.Blocks) * 512.0 > 0.8) {
+							//logger.Debug("File %s hasn't been changed ", filepath)
+							atomic.AddUint64(&FilesSkippedCount, 1)
+							continue
+						}
 					}
 					//logger.Debugf("File %s exists and is modified ", filepath)
 					err = toDataStore.Remove(filepath)
@@ -213,30 +216,16 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					}
 				}
 
-				if sourceFileMeta.Size() > (1 << 30)*500 {
-					logger.Errorf("Skipping file >500GB %s", filepath)
-					continue
+				cmd := exec.Command("/usr/bin/rsync", "--sparse", path.Join(fromDataStore.GetMountPath(), filepath), path.Join(toDataStore.GetMountPath(), filepath))
+				_, err := cmd.StdoutPipe()
+				if err != nil {
+					logger.Errorf("Error starting rsync: %v", err)
+				}
+				if err := cmd.Run(); err != nil {
+					logger.Errorf("Error running rsync: %v", err)
 				}
 
-				//logger.Debug("Started copying %s %d", filepath, worker)
-				src, err := fromDataStore.Open(filepath)
-				if err != nil {
-					logger.Error("Error opening src file ", filepath, ": ", err)
-					continue
-				}
-				dest, err := toDataStore.Create(filepath, sourceFileMeta)
-				if err != nil {
-					logger.Error("Error opening dst file ", filepath, ": ", err)
-					continue
-				}
-				bytesCopied, err := bufioprop.Copy(dest, src, 1048559)
-				if err != nil {
-					logger.Error("Error copying file ", filepath, ": ", err)
-					continue
-				}
-
-				src.Close()
-				dest.Close()
+				logger.Debugf("Copied: %v", filepath)
 
 				if err = toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid)); err != nil {
 					logger.Error(err.Error())
@@ -249,7 +238,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				}
 
 				atomic.AddUint64(&FilesCopiedCount, 1)
-				atomic.AddUint64(&BytesCount, uint64(bytesCopied))
+				atomic.AddUint64(&BytesCount, uint64(sourceFileMeta.Size()))
 
 				//logger.Debug("Done copying %s: %d bytes", filepath, bytesCopied)
 			case mode.IsDir():
@@ -319,7 +308,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 		skipped := 0
 
 		for _, filepath := range taskStruct.ItemPath {
-			logger.Debugf("Processing %s", filepath)
+			//logger.Debugf("Processing %s", filepath)
 			sourceFileMeta, err := fromDataStore.GetMetadata(filepath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source file
