@@ -337,6 +337,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 				if fromDataStore.GetPurgeFilesOlder() > 0 && (time.Since(sourceAtime).Hours()/24.0 > float64(fromDataStore.GetPurgeFilesOlder())) {
 					//logger.Error(filepath)
+					logger.Infof("Deleting file %s", filepath)
 					if err := fromDataStore.Remove(filepath); err != nil {
 						logger.Errorf("Error deleting file %s: %s", filepath, err.Error())
 					}
@@ -356,6 +357,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			if len(strings.Split(taskStruct.ItemPath[0], string(os.PathSeparator))) > 3 {
 				//purgeQueue <- "Dir "+path.Dir(taskStruct.ItemPath[0])
 				//logger.Error("Dir "+path.Dir(taskStruct.ItemPath[0]))
+				logger.Infof("Deleting dir %s", path.Dir(taskStruct.ItemPath[0]))
 				if err := fromDataStore.Remove(path.Dir(taskStruct.ItemPath[0])); err != nil {
 					logger.Errorf("Error deleting folder %s: %s", path.Dir(taskStruct.ItemPath[0]), err.Error())
 				}
