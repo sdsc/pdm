@@ -504,7 +504,10 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			return err
 		}
 
+		count := 0
+
 		for dir := range dirsChan {
+			count++
 			msgTask := task{
 				"copy",
 				dir}
@@ -526,6 +529,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		for files := range filesChan {
+			count++
 			msgTask := task{
 				"copy",
 				files}
@@ -538,6 +542,10 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
 			pubChan <- msg
+		}
+
+		if count == 0 {
+			logger.Errorf("Folder %s is empty", dirPath)
 		}
 
 	case "clear":
