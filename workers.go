@@ -213,8 +213,8 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					}
 				}
 
-				if sourceFileMeta.Size() > (1 << 30)*500 {
-					logger.Errorf("Skipping file >500GB %s", filepath)
+				if viper.GetInt("skip_files_larger_gb") > 0 && sourceFileMeta.Size() > (1 << 30)*viper.GetInt64("skip_files_larger_gb") {
+					logger.Errorf("Skipping file > %d GB %s", viper.GetInt("skip_files_larger_gb"), filepath)
 					continue
 				}
 
