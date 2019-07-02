@@ -138,6 +138,10 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				continue
 			}
 
+			if sourceFileMeta.Mode() & 2 != 0 {
+				logger.Infof("World-writeable file %s", filepath)
+			}
+
 			switch mode := sourceFileMeta.Mode(); {
 			case mode.IsRegular():
 				//TODO: check stripes
@@ -237,6 +241,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 				src.Close()
 				dest.Close()
+
 
 				if err = toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid)); err != nil {
 					logger.Error(err.Error())
