@@ -138,9 +138,9 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				continue
 			}
 
-			if sourceFileMeta.Mode() & 2 != 0 {
-				logger.Infof("World-writeable file %s", filepath)
-			}
+			//if sourceFileMeta.Mode() & 2 != 0 {
+			//	logger.Infof("World-writeable file %s", filepath)
+			//}
 
 			switch mode := sourceFileMeta.Mode(); {
 			case mode.IsRegular():
@@ -549,9 +549,9 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			pubChan <- msg
 		}
 
-		if count == 0 {
-			logger.Errorf("Folder %s is empty", dirPath)
-		}
+		//if count == 0 {
+		//	logger.Errorf("Folder %s is empty", dirPath)
+		//}
 
 	case "clear":
 		if dirPath != "/" {
