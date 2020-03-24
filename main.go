@@ -531,6 +531,19 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
 					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
 				}
+			case "posix":
+				dataBackends[k] = PosixDatastore{
+					k,
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+				}
 			}
 			if viper.IsSet(fmt.Sprintf("datasource.%s.mount", k)) && viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)) {
 				checkMountpoints = append(checkMountpoints, viper.GetString(fmt.Sprintf("datasource.%s.path", k)))
