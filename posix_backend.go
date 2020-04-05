@@ -21,6 +21,11 @@ type PosixDatastore struct {
 	recogniseTypes bool
 	noGroup        bool
 	skipPaths      []string
+	priority	   uint8
+}
+
+func (l PosixDatastore) GetPriority() uint8 {
+	return l.priority
 }
 
 func (l PosixDatastore) GetId() string {

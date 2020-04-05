@@ -121,7 +121,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					return
 				}
 
-				msg := message{taskEnc, "file." + toDataStore.GetId()}
+				msg := message{taskEnc, "file." + toDataStore.GetId(), fromDataStore.GetPriority()}
 				pubChan <- msg
 			}()
 		}
@@ -523,7 +523,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 				continue
 			}
 
-			msg := message{taskEnc, "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			msg := message{taskEnc, "dir." + fromDataStore.GetId() + "." + toDataStore.GetId(), fromDataStore.GetPriority()}
 			pubChan <- msg
 		}
 
@@ -545,7 +545,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 				continue
 			}
 
-			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId(), fromDataStore.GetPriority()}
 			pubChan <- msg
 		}
 
@@ -579,7 +579,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 				continue
 			}
 
-			msg := message{taskEnc, "dir." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			msg := message{taskEnc, "dir." + fromDataStore.GetId() + "." + toDataStore.GetId(), fromDataStore.GetPriority()}
 			pubChan <- msg
 		}
 
@@ -600,7 +600,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 				continue
 			}
 
-			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId()}
+			msg := message{taskEnc, "file." + fromDataStore.GetId() + "." + toDataStore.GetId(), fromDataStore.GetPriority()}
 			pubChan <- msg
 		}
 
@@ -635,7 +635,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 				continue
 			}
 
-			msg := message{taskEnc, "dir." + fromDataStore.GetId()}
+			msg := message{taskEnc, "dir." + fromDataStore.GetId(), fromDataStore.GetPriority()}
 			pubChan <- msg
 		}
 
@@ -656,7 +656,7 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 				continue
 			}
 
-			msg := message{taskEnc, "file." + fromDataStore.GetId()}
+			msg := message{taskEnc, "file." + fromDataStore.GetId(), fromDataStore.GetPriority()}
 			pubChan <- msg
 		}
 	}
@@ -754,7 +754,7 @@ func getElasticFiles(dataStore storage_backend) {
 						continue
 					}
 
-					msg := message{taskEnc, "file." + dataStore.GetId()}
+					msg := message{taskEnc, "file." + dataStore.GetId(), dataStore.GetPriority()}
 					pubChan <- msg
 					filesBuf = filesBuf[:0]
 				}
@@ -779,7 +779,7 @@ func getElasticFiles(dataStore storage_backend) {
 					logger.Error("Error encoding clearscan message: ", err)
 				}
 
-				msg := message{taskEnc, "file." + dataStore.GetId()}
+				msg := message{taskEnc, "file." + dataStore.GetId(), dataStore.GetPriority()}
 				pubChan <- msg
 			}
 

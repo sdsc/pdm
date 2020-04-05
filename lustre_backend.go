@@ -31,6 +31,11 @@ type LustreDatastore struct {
 	recogniseTypes bool
 	noGroup        bool
 	skipPaths      []string
+	priority		uint8
+}
+
+func (l LustreDatastore) GetPriority() uint8 {
+	return l.priority
 }
 
 func (l LustreDatastore) GetId() string {

@@ -37,6 +37,7 @@ type storage_backend interface {
 	GetSkipFilesOlder() int
 	GetPurgeFilesOlder() int
 	GetLocalFilepath(filePath string) string
+	GetPriority() uint8
 	GetSkipPaths() []string
 	GetElasticIndex() string
 	IsRecogniseTypes() bool
@@ -113,6 +114,7 @@ var ctx, done = context.WithCancel(context.Background())
 type message struct {
 	Body       []byte
 	RoutingKey string
+	Priority uint8
 }
 
 type task struct {
@@ -230,6 +232,7 @@ func publish(sessions chan chan session, messages <-chan message, cancel context
 				err := ch.Publish(curExchange, msg.RoutingKey, false, false, amqp.Publishing{
 					Body:         msg.Body,
 					DeliveryMode: amqp.Persistent,
+					Priority: msg.Priority,
 				})
 				// Retry failed delivery on the next session
 				if err != nil {
@@ -291,7 +294,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 						if k2 != k {
 							routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
 
-							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
+							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy", "x-max-priority": 10})
 							if err != nil {
 								logger.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 								return
@@ -349,7 +352,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 			for k := range viper.Get("datasource").(map[string]interface{}) {
 				routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s", k), fmt.Sprintf("dir.%s", k)
 
-				queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy"})
+				queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy", "x-max-priority": 10})
 				if err != nil {
 					logger.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 					return
@@ -528,8 +531,9 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
-					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.#{k}.no_group")),
+					viper.GetStringSlice(fmt.Sprintf("datasource.#{k}.skip_path")),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.priority"))),
 				}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
@@ -541,8 +545,9 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
+					viper.GetBool(fmt.Sprintf("datasource.#{k}.no_group")),
 					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.priority"))),
 				}
 			}
 			if viper.IsSet(fmt.Sprintf("datasource.%s.mount", k)) && viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)) {
@@ -622,7 +627,7 @@ func main() {
 					continue
 				}
 
-				msg := message{buf.Bytes(), prometheusTopic}
+				msg := message{buf.Bytes(), prometheusTopic, 0}
 				pubChan <- msg
 
 			}
@@ -665,7 +670,7 @@ func main() {
 			return
 		}
 
-		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceCopyParam + "." + *targetCopyParam}
+		var msg = message{buf.Bytes(), queuePrefix + "." + *sourceCopyParam + "." + *targetCopyParam, 0}
 		pub_chan <- msg
 		close(pub_chan)
 
@@ -703,7 +708,7 @@ func main() {
 			return
 		}
 
-		var msg = message{taskEnc, queuePrefix + "." + *sourceClearParam + "." + *targetClearParam}
+		var msg = message{taskEnc, queuePrefix + "." + *sourceClearParam + "." + *targetClearParam, 0}
 		pub_chan <- msg
 		close(pub_chan)
 
@@ -741,7 +746,7 @@ func main() {
 			return
 		}
 
-		var msg = message{taskEnc, queuePrefix + "." + *fsScanParam}
+		var msg = message{taskEnc, queuePrefix + "." + *fsScanParam, 0}
 		pub_chan <- msg
 		close(pub_chan)
 
@@ -776,7 +781,7 @@ func main() {
 			return
 		}
 
-		var msg = message{taskEnc, queuePrefix + "." + *fsPurgeParam}
+		var msg = message{taskEnc, queuePrefix + "." + *fsPurgeParam, 0}
 		pub_chan <- msg
 		close(pub_chan)
 
@@ -806,6 +811,7 @@ func main() {
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
 					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.no_group"))),
 				}
 			}
 		}
@@ -867,8 +873,9 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
-					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
+					viper.GetBool(fmt.Sprintf("datasource.#{k}.no_group")),
 					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.no_group"))),
 				}
 			}
 		}
