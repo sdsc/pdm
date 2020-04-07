@@ -294,7 +294,7 @@ func subscribe(sessions chan chan session, file_messages chan<- amqp.Delivery, f
 						if k2 != k {
 							routingKeyFile, routingKeyDir := fmt.Sprintf("file.%s.%s", k2, k), fmt.Sprintf("dir.%s.%s", k2, k)
 
-							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy", "x-max-priority": 10})
+							queueFile, err := filech.QueueDeclare(routingKeyFile, false, false, false, false, amqp.Table{"x-queue-mode": "lazy", "x-max-priority": 9})
 							if err != nil {
 								logger.Errorf("cannot consume from exclusive queue: %q, %v", queueFile, err)
 								return
