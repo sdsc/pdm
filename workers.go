@@ -341,10 +341,13 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				sourceAtime := getAtime(sourceStat)
 
 				if fromDataStore.GetPurgeFilesOlder() > 0 && (time.Since(sourceAtime).Hours()/24.0 > float64(fromDataStore.GetPurgeFilesOlder())) {
-					//logger.Error(filepath)
-					logger.Infof("Deleting file %s", filepath)
-					if err := fromDataStore.Remove(filepath); err != nil {
-						logger.Errorf("Error deleting file %s: %s", filepath, err.Error())
+					if !fromDataStore.GetPurgeDryRun() {
+						logger.Infof("Deleting file %s", filepath)
+						if err := fromDataStore.Remove(filepath); err != nil {
+							logger.Errorf("Error deleting file %s: %s", filepath, err.Error())
+						}
+					} else {
+						logger.Infof("Dry-run deleting file %s", filepath)
 					}
 					atomic.AddUint64(&FilesRemovedCount, 1)
 				} else {
@@ -663,7 +666,12 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		if taskStruct.Action == "purge" && filesCount == 0 && len(strings.Split(dirPath, "/")) > 3 { // del empty folders, don't want to delete upper ones
-			fromDataStore.Remove(dirPath)
+			if !fromDataStore.GetPurgeDryRun() {
+				logger.Infof("Deleting folder %s", dirPath)
+				fromDataStore.Remove(dirPath)
+			} else {
+				logger.Infof("Dry-run deleting folder %s", dirPath)
+			}
 		}
 	}
 

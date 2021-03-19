@@ -33,6 +33,7 @@ type LustreDatastore struct {
 	noGroup         bool
 	skipPaths       []string
 	priority        uint8
+	purgeDryRun     bool
 }
 
 func (l LustreDatastore) GetPriority() uint8 {
@@ -41,6 +42,10 @@ func (l LustreDatastore) GetPriority() uint8 {
 
 func (l LustreDatastore) GetId() string {
 	return l.id
+}
+
+func (l LustreDatastore) GetPurgeDryRun() bool {
+	return l.purgeDryRun
 }
 
 func (l LustreDatastore) GetElasticIndex() string {
