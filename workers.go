@@ -361,8 +361,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 		if skipped == 0 && len(taskStruct.ItemPath) > 0 { // dir is now empty
 			if len(strings.Split(taskStruct.ItemPath[0], string(os.PathSeparator))) > 3 {
-				//purgeQueue <- "Dir "+path.Dir(taskStruct.ItemPath[0])
-				//logger.Error("Dir "+path.Dir(taskStruct.ItemPath[0]))
 				logger.Infof("Deleting dir %s", path.Dir(taskStruct.ItemPath[0]))
 				if err := fromDataStore.Remove(path.Dir(taskStruct.ItemPath[0])); err != nil {
 					logger.Errorf("Error deleting folder %s: %s", path.Dir(taskStruct.ItemPath[0]), err.Error())
