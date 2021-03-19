@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
 	//"runtime"
 	//"github.com/intel-hpdd/go-lustre/llapi"
 	"path"
@@ -20,18 +21,18 @@ const Lustre5StripeSize = 100 * 1000000000
 const Lustre10StripeSize = 1000 * 1000000000
 
 type LustreDatastore struct {
-	id             string
-	mountPath      string
-	canWrite       bool
-	skipFilesNewer int
-	skipFilesOlder int
+	id              string
+	mountPath       string
+	canWrite        bool
+	skipFilesNewer  int
+	skipFilesOlder  int
 	purgeFilesOlder int
-	MDSNum         int
-	elasticIndex   string
-	recogniseTypes bool
-	noGroup        bool
-	skipPaths      []string
-	priority		uint8
+	MDSNum          int
+	elasticIndex    string
+	recogniseTypes  bool
+	noGroup         bool
+	skipPaths       []string
+	priority        uint8
 }
 
 func (l LustreDatastore) GetPriority() uint8 {
@@ -250,7 +251,7 @@ func (l LustreDatastore) Chtimes(dirPath string, atime time.Time, mtime time.Tim
 }
 
 func (l LustreDatastore) ListDir(dirPath string, listFiles bool) (chan []string, error) {
-	outchan := make(chan []string)
+	outchan := make(chan []string, 1000)
 
 	curDir := path.Join(l.mountPath, dirPath)
 

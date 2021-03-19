@@ -15,6 +15,7 @@ import (
 
 	"crypto/md5"
 	"fmt"
+
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
@@ -217,7 +218,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					}
 				}
 
-				if viper.GetInt("skip_files_larger_gb") > 0 && sourceFileMeta.Size() > (1 << 30)*viper.GetInt64("skip_files_larger_gb") {
+				if viper.GetInt("skip_files_larger_gb") > 0 && sourceFileMeta.Size() > (1<<30)*viper.GetInt64("skip_files_larger_gb") {
 					logger.Errorf("Skipping file > %d GB %s", viper.GetInt("skip_files_larger_gb"), filepath)
 					continue
 				}
@@ -241,7 +242,6 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 				src.Close()
 				dest.Close()
-
 
 				if err = toDataStore.Lchown(filepath, int(sourceFileMeta.Sys().(*syscall.Stat_t).Uid), int(sourceFileMeta.Sys().(*syscall.Stat_t).Gid)); err != nil {
 					logger.Error(err.Error())
@@ -351,9 +351,10 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 					atomic.AddUint64(&FilesSkippedCount, 1)
 					skipped++
 				}
-			default: {
-				skipped++
-			}
+			default:
+				{
+					skipped++
+				}
 			}
 
 		}
@@ -645,7 +646,10 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 			return err
 		}
 
+		filesCount := 0
+
 		for files := range filesChan {
+			filesCount++
 			msgTask := task{
 				taskStruct.Action,
 				files}
@@ -658,6 +662,10 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 
 			msg := message{taskEnc, "file." + fromDataStore.GetId(), fromDataStore.GetPriority()}
 			pubChan <- msg
+		}
+
+		if taskStruct.Action == "purge" && filesCount == 0 && len(strings.Split(dirPath, "/")) > 3 { // del empty folders, don't want to delete upper ones
+			fromDataStore.Remove(dirPath)
 		}
 	}
 
