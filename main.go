@@ -23,9 +23,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/olivere/elastic/v7"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/olivere/elastic.v5"
-	"gopkg.in/sohlich/elogrus.v2"
+	"gopkg.in/sohlich/elogrus.v7"
 
 	"math/rand"
 )
@@ -511,41 +511,41 @@ func main() {
 		}()
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
-			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.#{k}.type")); datastore_type {
+			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
 			case "lustre":
 				dataBackends[k] = LustreDatastore{
 					k,
-					viper.GetString(fmt.Sprintf("datasource.#{k}.path")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.write")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_newer_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_older_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.purge_files_older_days")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.mds")),
-					viper.GetString(fmt.Sprintf("datasource.#{k}.elastic_index")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.recognise_types")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.no_group")),
-					viper.GetStringSlice(fmt.Sprintf("datasource.#{k}.skip_path")),
-					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.priority"))),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.purge_dry_run")),
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
+					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.priority", k))),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 				}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
 					k,
-					viper.GetString(fmt.Sprintf("datasource.#{k}.path")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.write")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_newer_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_older_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.purge_files_older_days")),
-					viper.GetString(fmt.Sprintf("datasource.#{k}.elastic_index")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.recognise_types")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.no_group")),
-					viper.GetStringSlice(fmt.Sprintf("datasource.#{k}.skip_path")),
-					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.priority"))),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.purge_dry_run")),
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.priority", k))),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 				}
 			}
-			if viper.IsSet(fmt.Sprintf("datasource.#{k}.mount")) && viper.GetBool(fmt.Sprintf("datasource.#{k}.mount")) {
-				checkMountpoints = append(checkMountpoints, viper.GetString(fmt.Sprintf("datasource.#{k}.path")))
+			if viper.IsSet(fmt.Sprintf("datasource.%s.mount", k)) && viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)) {
+				checkMountpoints = append(checkMountpoints, viper.GetString(fmt.Sprintf("datasource.%s.path", k)))
 			}
 		}
 
@@ -626,6 +626,9 @@ func main() {
 
 			}
 		}()
+
+		logger.Info("Worker started")
+
 		workersWg.Wait()
 
 	case copyCommand.FullCommand():
@@ -791,22 +794,22 @@ func main() {
 		}
 
 		for k := range viper.Get("datasource").(map[string]interface{}) {
-			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.#{k}.type")); datastore_type {
+			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
 			case "lustre":
 				dataBackends[k] = LustreDatastore{
 					k,
-					viper.GetString(fmt.Sprintf("datasource.#{k}.path")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.write")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_newer_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_older_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.purge_files_older_days")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.mds")),
-					viper.GetString(fmt.Sprintf("datasource.#{k}.elastic_index")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.recognise_types")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.no_group")),
-					viper.GetStringSlice(fmt.Sprintf("datasource.#{k}.skip_path")),
-					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.no_group"))),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.purge_dry_run")),
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
+					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.no_group", k))),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 				}
 			}
 		}
@@ -856,22 +859,22 @@ func main() {
 			logger.Level = logrus.DebugLevel
 		}
 		for k := range viper.Get("datasource").(map[string]interface{}) {
-			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.#{k}.type")); datastore_type {
+			switch datastore_type := viper.GetString(fmt.Sprintf("datasource.%s.type", k)); datastore_type {
 			case "lustre":
 				dataBackends[k] = LustreDatastore{
 					k,
-					viper.GetString(fmt.Sprintf("datasource.#{k}.path")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.write")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_newer_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.skip_files_older_minutes")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.purge_files_older_days")),
-					viper.GetInt(fmt.Sprintf("datasource.#{k}.mds")),
-					viper.GetString(fmt.Sprintf("datasource.#{k}.elastic_index")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.recognise_types")),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.no_group")),
-					viper.GetStringSlice(fmt.Sprintf("datasource.#{k}.skip_path")),
-					uint8(viper.GetInt(fmt.Sprintf("datasource.#{k}.no_group"))),
-					viper.GetBool(fmt.Sprintf("datasource.#{k}.purge_dry_run")),
+					viper.GetString(fmt.Sprintf("datasource.%s.path", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.write", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
+					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
+					viper.GetStringSlice(fmt.Sprintf("datasource.%s.skip_path", k)),
+					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.no_group", k))),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 				}
 			}
 		}

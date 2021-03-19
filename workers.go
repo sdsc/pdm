@@ -17,12 +17,12 @@ import (
 	"fmt"
 
 	"github.com/karalabe/bufioprop" //https://groups.google.com/forum/#!topic/golang-nuts/Mwn9buVnLmY
+	"github.com/olivere/elastic/v7"
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/cheggaaa/pb.v1"
-	"gopkg.in/olivere/elastic.v6"
 )
 
 func processFilesStream(wg *sync.WaitGroup) chan<- amqp.Delivery {
@@ -185,7 +185,7 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 								Do(context.Background())
 
 							var f fileIdx
-							if err = json.Unmarshal(*res.Source, &f); err != nil {
+							if err = json.Unmarshal(res.Source, &f); err != nil {
 								logger.Errorf("Error deserializing the document %s: %s", filepath, err.Error())
 								indexFiles = append(indexFiles, filepath)
 							} else {
@@ -733,7 +733,7 @@ func getElasticFiles(dataStore storage_backend) {
 			// Send the hits to the hits channel
 			for _, hit := range results.Hits.Hits {
 				select {
-				case hits <- *hit.Source:
+				case hits <- hit.Source:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
