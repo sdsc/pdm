@@ -8,3 +8,7 @@ import (
 func getAtime(sourceStat *syscall.Stat_t) time.Time {
 	return time.Unix(int64(sourceStat.Atim.Sec), int64(sourceStat.Atim.Nsec))
 }
+
+func getCtime(sourceStat *syscall.Stat_t) time.Time {
+	return time.Unix(int64(sourceStat.Ctim.Sec), int64(sourceStat.Ctim.Nsec))
+}

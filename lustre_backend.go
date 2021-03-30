@@ -34,6 +34,7 @@ type LustreDatastore struct {
 	skipPaths       []string
 	priority        uint8
 	purgeDryRun     bool
+	useCtimePurge   bool
 }
 
 func (l LustreDatastore) GetPriority() uint8 {
@@ -74,6 +75,10 @@ func (l LustreDatastore) IsRecogniseTypes() bool {
 
 func (l LustreDatastore) IsNoGroup() bool {
 	return l.noGroup
+}
+
+func (l LustreDatastore) IsUseCtimePurge() bool {
+	return l.useCtimePurge
 }
 
 func (l LustreDatastore) GetSkipFilesOlder() int {

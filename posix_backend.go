@@ -23,6 +23,7 @@ type PosixDatastore struct {
 	skipPaths       []string
 	priority        uint8
 	purgeDryRun     bool
+	useCtimePurge   bool
 }
 
 func (l PosixDatastore) GetPriority() uint8 {
@@ -59,6 +60,10 @@ func (l PosixDatastore) IsRecogniseTypes() bool {
 
 func (l PosixDatastore) IsNoGroup() bool {
 	return l.noGroup
+}
+
+func (l PosixDatastore) IsUseCtimePurge() bool {
+	return l.useCtimePurge
 }
 
 func (l PosixDatastore) GetSkipPaths() []string {

@@ -339,6 +339,9 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 			case mode.IsRegular():
 				sourceStat := sourceFileMeta.Sys().(*syscall.Stat_t)
 				sourceAtime := getAtime(sourceStat)
+				if fromDataStore.IsUseCtimePurge() {
+					sourceAtime = getCtime(sourceStat)
+				}
 
 				if fromDataStore.GetPurgeFilesOlder() > 0 && (time.Since(sourceAtime).Hours()/24.0 > float64(fromDataStore.GetPurgeFilesOlder())) {
 					if !fromDataStore.GetPurgeDryRun() {
