@@ -24,6 +24,7 @@ type PosixDatastore struct {
 	priority        uint8
 	purgeDryRun     bool
 	useCtimePurge   bool
+	purgeToTrash    bool
 }
 
 func (l PosixDatastore) GetPriority() uint8 {
@@ -66,6 +67,10 @@ func (l PosixDatastore) IsUseCtimePurge() bool {
 	return l.useCtimePurge
 }
 
+func (l PosixDatastore) IsPurgeToTrash() bool {
+	return l.purgeToTrash
+}
+
 func (l PosixDatastore) GetSkipPaths() []string {
 	return l.skipPaths
 }
@@ -96,6 +101,11 @@ func (l PosixDatastore) Remove(filePath string) error {
 
 func (l PosixDatastore) RemoveAll(filePath string) error {
 	return os.RemoveAll(path.Join(l.mountPath, filePath))
+}
+
+func (l PosixDatastore) Trash(filePath string) error {
+	os.MkdirAll(path.Join(l.mountPath, ".trash", filepath.Dir(filePath)), os.ModePerm)
+	return os.Rename(path.Join(l.mountPath, filePath), path.Join(l.mountPath, ".trash", filePath))
 }
 
 func (l PosixDatastore) Open(filePath string) (io.ReadCloser, error) {

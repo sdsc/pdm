@@ -35,6 +35,7 @@ type LustreDatastore struct {
 	priority        uint8
 	purgeDryRun     bool
 	useCtimePurge   bool
+	purgeToTrash    bool
 }
 
 func (l LustreDatastore) GetPriority() uint8 {
@@ -81,6 +82,10 @@ func (l LustreDatastore) IsUseCtimePurge() bool {
 	return l.useCtimePurge
 }
 
+func (l LustreDatastore) IsPurgeToTrash() bool {
+	return l.purgeToTrash
+}
+
 func (l LustreDatastore) GetSkipFilesOlder() int {
 	return l.skipFilesOlder
 }
@@ -103,6 +108,11 @@ func (l LustreDatastore) Symlink(pointTo, filePath string) error {
 
 func (l LustreDatastore) Remove(filePath string) error {
 	return os.Remove(path.Join(l.mountPath, filePath))
+}
+
+func (l LustreDatastore) Trash(filePath string) error {
+	os.MkdirAll(path.Join(l.mountPath, ".trash", filepath.Dir(filePath)), os.ModePerm)
+	return os.Rename(path.Join(l.mountPath, filePath), path.Join(l.mountPath, ".trash", filePath))
 }
 
 func (l LustreDatastore) RemoveAll(filePath string) error {

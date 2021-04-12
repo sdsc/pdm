@@ -346,8 +346,15 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 				if fromDataStore.GetPurgeFilesOlder() > 0 && (time.Since(sourceAtime).Hours()/24.0 > float64(fromDataStore.GetPurgeFilesOlder())) {
 					if !fromDataStore.GetPurgeDryRun() {
 						logger.Infof("Deleting file %s", filepath)
-						if err := fromDataStore.Remove(filepath); err != nil {
-							logger.Errorf("Error deleting file %s: %s", filepath, err.Error())
+
+						if !fromDataStore.IsPurgeToTrash() {
+							if err := fromDataStore.Remove(filepath); err != nil {
+								logger.Errorf("Error deleting file %s: %s", filepath, err.Error())
+							}
+						} else {
+							if err := fromDataStore.Trash(filepath); err != nil {
+								logger.Errorf("Error trashing file %s: %s", filepath, err.Error())
+							}
 						}
 					} else {
 						logger.Infof("Dry-run deleting file %s", filepath)

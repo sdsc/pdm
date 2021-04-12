@@ -44,11 +44,13 @@ type storage_backend interface {
 	IsRecogniseTypes() bool
 	IsNoGroup() bool
 	IsUseCtimePurge() bool
+	IsPurgeToTrash() bool
 	GetMetadata(filePath string) (os.FileInfo, error)
 	Readlink(filePath string) (string, error)
 	Symlink(pointTo, filePath string) error
 	Remove(filePath string) error
 	RemoveAll(filePath string) error
+	Trash(filePath string) error
 	Open(filePath string) (io.ReadCloser, error)
 	Create(filePath string, meta os.FileInfo) (io.WriteCloser, error)
 	Lchown(filePath string, uid, gid int) error
@@ -529,6 +531,7 @@ func main() {
 					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.priority", k))),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_use_ctime", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_to_trash", k)),
 				}
 			case "posix":
 				dataBackends[k] = PosixDatastore{
@@ -545,6 +548,7 @@ func main() {
 					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.priority", k))),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_use_ctime", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_to_trash", k)),
 				}
 			}
 			if viper.IsSet(fmt.Sprintf("datasource.%s.mount", k)) && viper.GetBool(fmt.Sprintf("datasource.%s.mount", k)) {
@@ -814,6 +818,7 @@ func main() {
 					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.no_group", k))),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_use_ctime", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_to_trash", k)),
 				}
 			}
 		}
@@ -880,6 +885,7 @@ func main() {
 					uint8(viper.GetInt(fmt.Sprintf("datasource.%s.no_group", k))),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_dry_run", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.purge_use_ctime", k)),
+					viper.GetBool(fmt.Sprintf("datasource.%s.purge_to_trash", k)),
 				}
 			}
 		}
