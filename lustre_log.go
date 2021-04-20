@@ -3,13 +3,15 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/patrickmn/go-cache"
 	"io/ioutil"
 	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/patrickmn/go-cache"
+	"github.com/spf13/viper"
 )
 
 type LustreEvent struct {
@@ -22,7 +24,7 @@ type LustreEvent struct {
 var c = cache.New(5*time.Minute, 10*time.Minute)
 
 func listenLog() {
-	eventsChan := make(chan string, 100000)
+	eventsChan := make(chan string, viper.GetInt("listen_queue"))
 
 	go func() {
 		for range time.NewTicker(5 * time.Second).C {
@@ -81,53 +83,63 @@ func listenLog() {
 		}(mdt, user)
 	}
 
-	for i := 0; i < 2; i++ {
+	for j := 0; j < viper.GetInt("listen_workers"); j++ {
 		go func() {
 			for evtStr := range eventsChan {
 				evtTokens := strings.Split(evtStr, " ")
 				switch evtTokens[1] {
 				case "01CREAT":
-					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of created file: %s", err.Error())
 					}
-					LLFilesCreatedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+					LLFilesCreatedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
 				case "02MKDIR":
-					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of created folder: %s", err.Error())
 					}
-					LLFoldersCreatedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+					LLFoldersCreatedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
 				case "07RMDIR":
-					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of deleted folder: %s", err.Error())
 					}
-					LLFoldersRemovedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+					LLFoldersRemovedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
 				case "06UNLNK":
-					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of deleted file: %s", err.Error())
 					}
-					LLFilesRemovedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+					LLFilesRemovedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
+				case "10OPEN":
+					if len(evtTokens) < 5 || len(evtTokens[6]) < 5 {
+						logger.Errorf("Got unusual open event: |%s| %d %d %s", evtTokens, len(evtTokens), len(evtTokens[6]), evtTokens[6])
+					} else {
+						fstype, group, user, err := getOwner(evtTokens[6][3 : len(evtTokens[6])-1])
+						if err != nil {
+							logger.Errorf("Error getting fid of opened file: %s", err.Error())
+						}
+						LLFilesOpenedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
+					}
 				case "14SATTR":
-					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
-						logger.Errorf("Error getting fid of changed attr %s: %s", evtTokens[5][3 : len(evtTokens[5])-1], err.Error())
+						logger.Errorf("Error getting fid of changed attr %s: %s", evtTokens[5][3:len(evtTokens[5])-1], err.Error())
 					}
-					LLAttrChangedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+					LLAttrChangedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
 				case "15XATTR":
-					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
-						logger.Errorf("Error getting fid of changed attr %s: %s", evtTokens[5][3 : len(evtTokens[5])-1], err.Error())
+						logger.Errorf("Error getting fid of changed attr %s: %s", evtTokens[5][3:len(evtTokens[5])-1], err.Error())
 					}
-					LLXAttrChangedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+					LLXAttrChangedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
 				case "17MTIME":
-					group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
+					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
 					if err != nil {
 						logger.Errorf("Error getting fid of mtime %s: %s", evtTokens[5][3:len(evtTokens[5])-1], err.Error())
 					}
-					LLMtimeChangedCounter.WithLabelValues(group, user, *fsListenParam).Inc()
+					LLMtimeChangedCounter.WithLabelValues(fstype, group, user, *fsListenParam).Inc()
 				default:
 					logger.Errorf("Got unknown event: %s", evtTokens)
 				}
@@ -137,7 +149,7 @@ func listenLog() {
 
 }
 
-func getOwner(fid string) (string, string, error) {
+func getOwner(fid string) (fstype string, project string, user string, err error) { // works for combined /projects and /scratch
 
 	var rel string
 
@@ -150,22 +162,22 @@ func getOwner(fid string) (string, string, error) {
 
 		pathB, err := exec.Command("lfs", "fid2path", fs.GetMountPath(), fid).Output()
 		if err != nil {
-			return "unknown", "unknown", err
+			return "", "unknown", "unknown", err
 		}
 
 		path := string(pathB)
 		rel, err = filepath.Rel(fs.GetMountPath(), path)
 		if err != nil {
-			return "", "", err
+			return "", "unknown", "unknown", err
 		}
 		c.Set(fid, rel, cache.DefaultExpiration)
 	}
 
-	if len(strings.Split(rel, "/")) < 2 {
-		return "", "", fmt.Errorf("Path %s does not contain group and user", rel)
+	if len(strings.Split(rel, "/")) < 3 {
+		return "", "", "", fmt.Errorf("Path %s does not contain group and user", rel)
 	}
 
 	splitPath := strings.Split(rel, "/")
-	return splitPath[0], splitPath[1], nil
+	return splitPath[0], splitPath[1], splitPath[2], nil
 
 }

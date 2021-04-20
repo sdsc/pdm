@@ -68,37 +68,42 @@ var (
 		Name: "ll_files_created_number",
 		Help: "Number of files created",
 	},
-		[]string{"group", "user", "datasource"})
+		[]string{"fstype", "group", "user", "datasource"})
 	LLFilesRemovedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_files_removed_number",
 		Help: "Number of files removed",
 	},
-		[]string{"group", "user", "datasource"})
+		[]string{"fstype", "group", "user", "datasource"})
+	LLFilesOpenedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "ll_files_opened_number",
+		Help: "Number of files opened",
+	},
+		[]string{"fstype", "group", "user", "datasource"})
 	LLFoldersCreatedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_folders_created_number",
 		Help: "Number of folders created",
 	},
-		[]string{"group", "user", "datasource"})
+		[]string{"fstype", "group", "user", "datasource"})
 	LLFoldersRemovedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_folders_removed_number",
 		Help: "Number of folders removed",
 	},
-		[]string{"group", "user", "datasource"})
+		[]string{"fstype", "group", "user", "datasource"})
 	LLAttrChangedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_attr_changed_number",
 		Help: "Number of files with attributes changed",
 	},
-		[]string{"group", "user", "datasource"})
+		[]string{"fstype", "group", "user", "datasource"})
 	LLXAttrChangedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_xattr_changed_number",
 		Help: "Number of files with x attributes changed",
 	},
-		[]string{"group", "user", "datasource"})
+		[]string{"fstype", "group", "user", "datasource"})
 	LLMtimeChangedCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_mtime_changed_number",
 		Help: "Number of files with mtime changed",
 	},
-		[]string{"group", "user", "datasource"})
+		[]string{"fstype", "group", "user", "datasource"})
 	LLCacheHitsCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ll_cache_hits_number",
 		Help: "Number of fid cache hits",

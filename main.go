@@ -78,6 +78,9 @@ func readWorkerConfig() {
 	viper.SetDefault("monitor_mount_sec", 2)
 	viper.SetDefault("elastic_index", "idx")
 
+	viper.SetDefault("listen_workers", 4)
+	viper.SetDefault("listen_queue", 100000)
+
 	viper.SetDefault("copy", "true")
 	viper.SetDefault("scan", "true")
 
@@ -893,6 +896,7 @@ func main() {
 		listenLog()
 		prometheus.MustRegister(LLFilesCreatedCounter)
 		prometheus.MustRegister(LLFilesRemovedCounter)
+		prometheus.MustRegister(LLFilesOpenedCounter)
 		prometheus.MustRegister(LLFoldersCreatedCounter)
 		prometheus.MustRegister(LLFoldersRemovedCounter)
 		prometheus.MustRegister(LLAttrChangedCounter)
