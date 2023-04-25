@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/spf13/viper"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
-	"gopkg.in/alecthomas/kingpin.v2"
 
 	"net/http"
 
