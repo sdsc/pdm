@@ -87,6 +87,11 @@ func listenLog() {
 		go func() {
 			for evtStr := range eventsChan {
 				evtTokens := strings.Split(evtStr, " ")
+
+				if len(evtTokens) < 2 {
+					continue
+				}
+
 				switch evtTokens[1] {
 				case "01CREAT":
 					fstype, group, user, err := getOwner(evtTokens[5][3 : len(evtTokens[5])-1])
