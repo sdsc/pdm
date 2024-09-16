@@ -21,21 +21,22 @@ const Lustre5StripeSize = 100 * 1000000000
 const Lustre10StripeSize = 1000 * 1000000000
 
 type LustreDatastore struct {
-	id              string
-	mountPath       string
-	canWrite        bool
-	skipFilesNewer  int
-	skipFilesOlder  int
-	purgeFilesOlder int
-	MDSNum          int
-	elasticIndex    string
-	recogniseTypes  bool
-	noGroup         bool
-	skipPaths       []string
-	priority        uint8
-	purgeDryRun     bool
-	useCtimePurge   bool
-	purgeToTrash    bool
+	id                string
+	mountPath         string
+	canWrite          bool
+	skipFilesNewer    int
+	skipFilesOlder    int
+	purgeFilesOlder   int
+	purgeFoldersOlder int
+	MDSNum            int
+	elasticIndex      string
+	recogniseTypes    bool
+	noGroup           bool
+	skipPaths         []string
+	priority          uint8
+	purgeDryRun       bool
+	useCtimePurge     bool
+	purgeToTrash      bool
 }
 
 func (l LustreDatastore) GetPriority() uint8 {
@@ -68,6 +69,10 @@ func (l LustreDatastore) GetSkipFilesNewer() int {
 
 func (l LustreDatastore) GetPurgeFilesOlder() int {
 	return l.purgeFilesOlder
+}
+
+func (l LustreDatastore) GetPurgeFoldersOlder() int {
+	return l.purgeFoldersOlder
 }
 
 func (l LustreDatastore) IsRecogniseTypes() bool {

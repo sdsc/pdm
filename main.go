@@ -36,6 +36,7 @@ type storage_backend interface {
 	GetSkipFilesNewer() int
 	GetSkipFilesOlder() int
 	GetPurgeFilesOlder() int
+	GetPurgeFoldersOlder() int
 	GetPurgeDryRun() bool
 	GetLocalFilepath(filePath string) string
 	GetPriority() uint8
@@ -526,6 +527,7 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_folders_older_days", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
@@ -544,6 +546,7 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_folders_older_days", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.no_group", k)),
@@ -589,8 +592,8 @@ func main() {
 
 		var workersWg sync.WaitGroup
 
+		workersWg.Add(1)
 		go func() {
-			workersWg.Add(1)
 			publish(redial(ctx, viper.GetString("rabbitmq.connect_string")), pubChan, nil)
 			workersWg.Done()
 			done()
@@ -813,6 +816,7 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_folders_older_days", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),
@@ -880,6 +884,7 @@ func main() {
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_newer_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.skip_files_older_minutes", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.purge_files_older_days", k)),
+					viper.GetInt(fmt.Sprintf("datasource.%s.purge_folders_older_days", k)),
 					viper.GetInt(fmt.Sprintf("datasource.%s.mds", k)),
 					viper.GetString(fmt.Sprintf("datasource.%s.elastic_index", k)),
 					viper.GetBool(fmt.Sprintf("datasource.%s.recognise_types", k)),

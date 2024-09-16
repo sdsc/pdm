@@ -11,20 +11,21 @@ import (
 )
 
 type PosixDatastore struct {
-	id              string
-	mountPath       string
-	canWrite        bool
-	skipFilesNewer  int
-	skipFilesOlder  int
-	purgeFilesOlder int
-	elasticIndex    string
-	recogniseTypes  bool
-	noGroup         bool
-	skipPaths       []string
-	priority        uint8
-	purgeDryRun     bool
-	useCtimePurge   bool
-	purgeToTrash    bool
+	id                string
+	mountPath         string
+	canWrite          bool
+	skipFilesNewer    int
+	skipFilesOlder    int
+	purgeFilesOlder   int
+	purgeFoldersOlder int
+	elasticIndex      string
+	recogniseTypes    bool
+	noGroup           bool
+	skipPaths         []string
+	priority          uint8
+	purgeDryRun       bool
+	useCtimePurge     bool
+	purgeToTrash      bool
 }
 
 func (l PosixDatastore) GetPriority() uint8 {
@@ -53,6 +54,10 @@ func (l PosixDatastore) GetSkipFilesNewer() int {
 
 func (l PosixDatastore) GetPurgeFilesOlder() int {
 	return l.purgeFilesOlder
+}
+
+func (l PosixDatastore) GetPurgeFoldersOlder() int {
+	return l.purgeFoldersOlder
 }
 
 func (l PosixDatastore) IsRecogniseTypes() bool {

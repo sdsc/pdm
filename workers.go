@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"strings"
@@ -374,9 +375,13 @@ func processFiles(fromDataStore storage_backend, toDataStore storage_backend, ta
 
 		if skipped == 0 && len(taskStruct.ItemPath) > 0 { // dir is now empty
 			if len(strings.Split(taskStruct.ItemPath[0], string(os.PathSeparator))) > 3 {
-				logger.Infof("Deleting dir %s", path.Dir(taskStruct.ItemPath[0]))
-				if err := fromDataStore.Remove(path.Dir(taskStruct.ItemPath[0])); err != nil {
-					logger.Errorf("Error deleting folder %s: %s", path.Dir(taskStruct.ItemPath[0]), err.Error())
+				if !fromDataStore.GetPurgeDryRun() {
+					logger.Infof("Deleting dir %s", path.Dir(taskStruct.ItemPath[0]))
+					if err := fromDataStore.Remove(path.Dir(taskStruct.ItemPath[0])); err != nil {
+						logger.Errorf("Error deleting folder %s: %s", path.Dir(taskStruct.ItemPath[0]), err.Error())
+					}
+				} else {
+					logger.Infof("Dry run deleting folder %s", path.Dir(taskStruct.ItemPath[0]))
 				}
 			}
 		}
@@ -617,8 +622,12 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 	case "scan", "purge":
+
+		var dirMeta fs.FileInfo
+
 		if dirPath != "/" {
-			_, err := fromDataStore.GetMetadata(dirPath)
+			var err error
+			dirMeta, err = fromDataStore.GetMetadata(dirPath)
 			if err != nil {
 				if os.IsNotExist(err) { // the user already removed the source folder
 					logger.Debugf("Source folder not exists: %s", dirPath, err)
@@ -676,11 +685,14 @@ func processFolder(fromDataStore storage_backend, toDataStore storage_backend, t
 		}
 
 		if taskStruct.Action == "purge" && filesCount == 0 && len(strings.Split(dirPath, "/")) > 3 { // del empty folders, don't want to delete upper ones
-			if !fromDataStore.GetPurgeDryRun() {
-				logger.Infof("Deleting folder %s", dirPath)
-				fromDataStore.Remove(dirPath)
-			} else {
-				logger.Infof("Dry-run deleting folder %s", dirPath)
+			dirCtime := getCtime(dirMeta.Sys().(*syscall.Stat_t))
+			if time.Since(dirCtime).Hours()/24 > float64(fromDataStore.GetPurgeFoldersOlder()) {
+				if !fromDataStore.GetPurgeDryRun() {
+					logger.Infof("Deleting folder %s", dirPath)
+					fromDataStore.Remove(dirPath)
+				} else {
+					logger.Infof("Dry-run deleting folder %s", dirPath)
+				}
 			}
 		}
 	}
