@@ -22,9 +22,7 @@ Install Go environment.
 
 Run:
 ```
-go get https://github.com/sdsc/pdm
-cd $GOPATH/src/github.com/sdsc/pdm
-go get ./...
+go mod vendor
 go build
 ```
 

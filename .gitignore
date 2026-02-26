@@ -16,3 +16,4 @@
 config.toml
 pdm
 .idea
+vendor
